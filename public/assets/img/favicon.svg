@@ -1,0 +1,13 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="512" height="512" rx="96" fill="#004EA2"/>
+  <!-- T -->
+  <text x="256" y="175" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-weight="bold" font-size="140" fill="white" letter-spacing="8">T</text>
+  <!-- Zigzag 1 -->
+  <polyline points="96,220 152,196 208,220 264,196 320,220 376,196 432,220" stroke="white" stroke-width="14" fill="none" stroke-linejoin="round"/>
+  <!-- W -->
+  <text x="256" y="340" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-weight="bold" font-size="140" fill="white" letter-spacing="8">W</text>
+  <!-- Zigzag 2 -->
+  <polyline points="96,380 152,356 208,380 264,356 320,380 376,356 432,380" stroke="white" stroke-width="14" fill="none" stroke-linejoin="round"/>
+  <!-- I -->
+  <text x="256" y="488" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-weight="bold" font-size="140" fill="white" letter-spacing="8">I</text>
+</svg>

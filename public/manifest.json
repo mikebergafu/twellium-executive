@@ -1,0 +1,20 @@
+{
+  "short_name": "Twellium",
+  "name": "Twellium Admin",
+  "icons": [
+    {
+      "src": "twellium-logo-square.jpeg",
+      "sizes": "any",
+      "type": "image/jpeg"
+    },
+    {
+      "src": "logo.jpeg",
+      "sizes": "any",
+      "type": "image/jpeg"
+    }
+  ],
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#000000",
+  "background_color": "#ffffff"
+}
