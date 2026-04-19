@@ -253,6 +253,9 @@ const Overview = () => {
                 return;
             }
 
+            // Helper to find the other shift (fallback)
+            const otherShift = shifts.find(s => s.id !== targetShift.id);
+
             setCurrentShiftInfo({
                 id: targetShift.id,
                 name: targetShift.name,
@@ -298,7 +301,15 @@ const Overview = () => {
             ]);
 
             // Fetch OEE metrics for each report matching this shift
-            const shiftReportsList = (Array.isArray(shiftOeeRes.data) ? shiftOeeRes.data : []).filter(r => !r.pet_name?.toLowerCase().includes('can') && r.shift_name === targetShift.name);
+            let shiftReportsList = (Array.isArray(shiftOeeRes.data) ? shiftOeeRes.data : []).filter(r => !r.pet_name?.toLowerCase().includes('can') && r.shift_name === targetShift.name);
+
+            // If current shift has no data and user didn't manually select, fall back to previous shift
+            if (shiftReportsList.length === 0 && !selectedShiftId && otherShift) {
+                shiftReportsList = (Array.isArray(shiftOeeRes.data) ? shiftOeeRes.data : []).filter(r => !r.pet_name?.toLowerCase().includes('can') && r.shift_name === otherShift.name);
+                if (shiftReportsList.length > 0) {
+                    setCurrentShiftInfo(prev => ({ ...prev, id: otherShift.id, name: otherShift.name, start_time: otherShift.start_time, end_time: otherShift.end_time }));
+                }
+            }
             const oeeData = await Promise.all(shiftReportsList.map(async (r) => {
                 try {
                     const m = await productionApi.getReportOeeMetrics(r.id);
@@ -681,16 +692,14 @@ const Overview = () => {
             const stoppages = rawStoppages.filter(s => s.pet_name === l.name).length;
             const actualTime = stoppages * 60;
             const totalDT = oee?.totalDowntime > 0 ? oee.totalDowntime : l.downtime;
-            const plannedDT = oee?.plannedDowntime > 0 ? oee.plannedDowntime : l.plannedDowntime;
-            const operationalTime = actualTime - plannedDT;
-            const perf = operationalTime > 0 ? ((actualTime - totalDT) / operationalTime) * 100 : 0;
+            const perf = actualTime > 0 ? ((actualTime - totalDT) / actualTime) * 100 : 0;
             const plannedTime = oee?.plannedTime > 0 ? oee.plannedTime : (l.plannedTimeMins > 0 ? l.plannedTimeMins : shiftMins * l.reports);
             return {
             name: l.name,
             reports: l.reports,
             oee: l.reports > 0 ? clamp(l.oee / l.reports) : 0,
             performance: clamp(perf),
-            perfRaw: { plannedTime, totalDowntime: totalDT, plannedDowntime: plannedDT, mechDowntime: oee?.mechDowntime || 0 },
+            perfRaw: { plannedTime, totalDowntime: totalDT, mechDowntime: oee?.mechDowntime || 0 },
             production: l.production,
             downtime: l.downtime,
             stoppageCount: rawStoppages.filter(s => s.pet_name === l.name).length,
@@ -916,7 +925,7 @@ const Overview = () => {
                                     <i className="ti ti-clock-pause me-1"></i>{formatN(Math.round(line.downtime))}m
                                 </div>
                                 <div style={{ fontSize: '0.7rem', color: '#e65100', fontWeight: 600 }}>
-                                    <i className="ti ti-alert-triangle me-1"></i>{line.stoppageCount} stoppage{line.stoppageCount !== 1 ? 's' : ''}
+                                    <i className="ti ti-alert-triangle me-1"></i>{line.stoppageCount} Hour{line.stoppageCount !== 1 ? 's' : ''} submitted
                                 </div>
                                 <div style={{ fontSize: '0.6rem', color: '#94a3b8', marginTop: 2 }}>tap for details</div>
                             </div>
@@ -969,25 +978,23 @@ const Overview = () => {
                         <div className="rounded-3 p-2 mb-3" style={{ background: '#f8fafc', fontSize: '0.75rem', color: '#64748b' }}>
                             <div className="fw-bold mb-1" style={{ color: '#334155' }}>Performance Formula</div>
                             <div className="font-monospace" style={{ fontSize: '0.7rem' }}>
-                                (Stoppages × 60 − Total Downtime) / (Stoppages × 60 − Planned Downtime) × 100
+                                (Hours × 60 − Total Downtime) / (Hours × 60) × 100
                             </div>
                             <div className="font-monospace mt-1" style={{ fontSize: '0.7rem', color: '#1565c0' }}>
                                 ({(() => {
                                     const time = selectedLine.stoppageCount * 60;
                                     const td = Math.round(selectedLine.perfRaw?.totalDowntime || 0);
-                                    const pd = Math.round(selectedLine.perfRaw?.plannedDowntime || 0);
-                                    return `${selectedLine.stoppageCount} × 60 − ${td}) / (${time} − ${pd}) × 100 = ${selectedLine.performance.toFixed(1)}%`;
+                                    return `${selectedLine.stoppageCount} × 60 − ${td}) / (${time}) × 100 = ${selectedLine.performance.toFixed(1)}%`;
                                 })()}
                             </div>
                         </div>
                         {/* Detail rows */}
                         {[
-                            { label: 'Time (Stoppages × 60)', value: `${selectedLine.stoppageCount * 60} min (${selectedLine.stoppageCount} stoppages)`, color: '#2e7d32' },
+                            { label: 'Time (Hours × 60)', value: `${selectedLine.stoppageCount * 60} min (${selectedLine.stoppageCount} hour${selectedLine.stoppageCount !== 1 ? 's' : ''} submitted)`, color: '#2e7d32' },
                             { label: 'Bottles Produced', value: formatN(Math.round(selectedLine.production)), color: '#1565c0' },
                             { label: 'Downtime', value: `${Math.round(selectedLine.downtime)} min`, color: selectedLine.downtime > 30 ? '#f44336' : '#4caf50' },
                             { label: 'Planned Time', value: `${Math.round(selectedLine.perfRaw?.plannedTime || 0)} min`, color: '#555' },
                             { label: 'Total Downtime', value: `${Math.round(selectedLine.perfRaw?.totalDowntime || 0)} min`, color: '#555' },
-                            { label: 'Planned Downtime', value: `${Math.round(selectedLine.perfRaw?.plannedDowntime || 0)} min`, color: '#555' },
                             { label: 'Mechanical Downtime', value: `${Math.round(selectedLine.perfRaw?.mechDowntime || 0)} min`, color: '#d97706' },
                             { label: 'Reports', value: selectedLine.reports, color: '#555' },
                         ].map(row => (
