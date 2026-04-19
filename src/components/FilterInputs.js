@@ -9,7 +9,7 @@ const FilterInputs = ({ showPageSize = false }) => {
 
   useEffect(() => {
     productionApi.getPets({ page_size: 1000 })
-      .then(res => setPets((res.data.data || []).filter(pet => !pet.pet_name?.toLowerCase().includes('can'))))
+      .then(res => setPets((Array.isArray(res.data) ? res.data : []).filter(pet => !pet.pet_name?.toLowerCase().includes('can'))))
       .catch(err => console.error('Failed to load pets:', err));
   }, []);
 

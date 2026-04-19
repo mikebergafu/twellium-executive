@@ -23,13 +23,14 @@ export const AuthProvider = ({ children }) => {
         try {
             const response = await apiLogin({ username, password });
 
-            const { access, refresh, user: userData } = response.data;
+            const { access, refresh, user: userData } = response;
 
             localStorage.setItem('access_token', access);
             localStorage.setItem('refresh_token', refresh);
             localStorage.setItem('user', JSON.stringify(userData));
 
             setUser(userData);
+            document.documentElement.requestFullscreen?.().catch(() => {});
             return { success: true };
         } catch (error) {
             console.error("Login failed", error);

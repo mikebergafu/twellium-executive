@@ -2,18 +2,9 @@ import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { productionApi } from '../../api/production';
 import { useApiWithFilters } from '../../utils/useApiWithFilters';
 import { SkeletonGauges } from '../../components/ui/Skeletons';
+import YesterdayTodayComparison from '../../components/charts/YesterdayTodayComparison';
 
 /* ── helpers ─────────────────────────────────────── */
-const extractList = (res) => {
-    const d = res.data;
-    if (Array.isArray(d)) return d;
-    if (d?.data?.data && Array.isArray(d.data.data)) return d.data.data;
-    if (d?.data?.results && Array.isArray(d.data.results)) return d.data.results;
-    if (d?.results && Array.isArray(d.results)) return d.results;
-    if (d?.data && Array.isArray(d.data)) return d.data;
-    return [];
-};
-
 const clamp = (v) => Math.min(100, Math.max(0, v));
 
 /* ── Speed Gauge (admin-style semi-circle) ──────── */
@@ -61,8 +52,8 @@ const OeeGauge = ({ value, label, calculation, rawValues }) => {
     const arc = (s, e) => { const sp = p(s), ep = p(e); return `M ${sp.x} ${sp.y} A ${r} ${r} 0 ${Math.abs(s-e)>Math.PI?1:0} 1 ${ep.x} ${ep.y}`; };
     const zones = [{ end: 60, color: '#ef4444' }, { end: 85, color: '#f59e0b' }, { end: 100, color: '#22c55e' }];
     return (
-        <div className="d-flex flex-column align-items-center p-3 border rounded-3 shadow-sm" style={{ background: 'linear-gradient(135deg, #fff 0%, #f8f9fa 100%)' }}>
-            <h6 className="mb-3 text-center fw-semibold">{label}</h6>
+        <div className="d-flex flex-column align-items-center p-2 border rounded-3 shadow-sm" style={{ background: 'linear-gradient(135deg, #fff 0%, #f8f9fa 100%)' }}>
+            <h6 className="mb-1 text-center fw-semibold">{label}</h6>
             <div title={calculation || ''} style={{ cursor: 'help' }}>
                 <svg width={size} height={size * 0.75} viewBox={`0 0 ${size} ${size * 0.75}`}>
                     <defs><filter id={`sh-${label.replace(/\s/g,'')}`}><feDropShadow dx="0" dy="1" stdDeviation="2" floodOpacity="0.2"/></filter></defs>
@@ -121,6 +112,7 @@ const Overview = () => {
     const [currentShiftInfo, setCurrentShiftInfo] = useState(null);
     const [selectedShiftId, setSelectedShiftId] = useState(null);
     const [selectedLine, setSelectedLine] = useState(null);
+    const [showReportsModal, setShowReportsModal] = useState(false);
     const [shiftLoading, setShiftLoading] = useState(false);
     const [shiftFilterDate, setShiftFilterDate] = useState(() => new Date().toISOString().split('T')[0]);
     const [shiftComparisonData, setShiftComparisonData] = useState({});
@@ -144,50 +136,45 @@ const Overview = () => {
             const params = getParams();
             const stoppageParams = getParams({}, true);
             
-            // Ensure datetime parameters are always set for OEE summary
-            const todayStart = new Date();
-            todayStart.setHours(0, 0, 0, 0);
-            const todayEnd = new Date();
-            todayEnd.setHours(23, 59, 59, 0);
-            
-            const oeeSummaryParams = {
-                ...params,
-                datetime_start_time: params.datetime_start_time || todayStart.toISOString().replace(/\.\d{3}Z$/, 'Z'),
-                datetime_end_time: params.datetime_end_time || todayEnd.toISOString().replace(/\.\d{3}Z$/, 'Z')
-            };
-            
-            const allReportsParams = { 
-                datetime_start_time: todayStart.toISOString().replace(/\.\d{3}Z$/, 'Z'),
-                datetime_end_time: todayEnd.toISOString().replace(/\.\d{3}Z$/, 'Z')
-            };
+            const todayStr = new Date().toISOString().split('T')[0];
             
             // Fetch shifts from API
             const shiftsRes = await productionApi.getShifts();
-            const shiftsData = shiftsRes?.data?.data || shiftsRes?.data || [];
+            const shiftsData = Array.isArray(shiftsRes?.data) ? shiftsRes.data : [];
             setShifts(shiftsData);
             
-            const [oeeSummaryRes, petsRes, stoppagesRes, allReportsRes] = await Promise.all([
-                productionApi.getOeeSummary(oeeSummaryParams),
+            const [reportsRes, petsRes, stoppagesRes] = await Promise.all([
+                productionApi.getReports({ ...params, start_date: todayStr, end_date: todayStr, page_size: 1000 }),
                 productionApi.getPets(params),
                 productionApi.getStoppages(stoppageParams),
-                productionApi.getOeeSummary(allReportsParams),
             ]);
 
             if (controller.signal.aborted) return;
 
-            const reports = extractList(oeeSummaryRes || {}).filter(r => !r.pet_name?.toLowerCase().includes('can'));
-            const allReportsData = extractList(allReportsRes || {}).filter(r => !r.pet_name?.toLowerCase().includes('can'));
-            // Sort reports by PET name
+            const reportsList = (Array.isArray(reportsRes.data) ? reportsRes.data : []).filter(r => !r.pet_name?.toLowerCase().includes('can'));
+
+            // Batch-fetch OEE metrics for each report
+            const reportsWithMetrics = await Promise.all(reportsList.map(async (r) => {
+                try {
+                    const m = await productionApi.getReportOeeMetrics(r.id);
+                    const md = m.data?.data || m.data || {};
+                    return { ...r, metrics: { availability: md.availability || 0, performance: md.efficiency || 0, quality: md.quality || 0, oee: md.oee || 0, details: md.details || {} } };
+                } catch { return { ...r, metrics: null }; }
+            }));
+
+            if (controller.signal.aborted) return;
+
             const sortByPet = (arr) => arr.sort((a, b) => {
                 const aNum = parseInt(a.pet_name?.match(/(\d+)/)?.[0] || '999');
                 const bNum = parseInt(b.pet_name?.match(/(\d+)/)?.[0] || '999');
                 return aNum - bNum;
             });
 
-            setRawReports(sortByPet(reports));
-            setRawPets(extractList(petsRes || {}).filter(pet => !pet.pet_name?.toLowerCase().includes('can')));
-            setRawStoppages(extractList(stoppagesRes || {}).filter(s => !(s.pet_name || s.line_name || '').toLowerCase().includes('can')));
-            setAllReports(sortByPet(allReportsData));
+            setRawReports(sortByPet(reportsWithMetrics));
+            setRawPets((Array.isArray(petsRes.data) ? petsRes.data : []).filter(pet => !pet.pet_name?.toLowerCase().includes('can')));
+            setRawStoppages((Array.isArray(stoppagesRes.data) ? stoppagesRes.data : []).filter(s => !(s.pet_name || s.line_name || '').toLowerCase().includes('can')));
+            setAllReports(sortByPet(reportsWithMetrics));
+
             hasFetched.current = true;
         } catch (err) {
             if (err?.name === 'CanceledError' || err?.name === 'AbortError') return;
@@ -206,11 +193,16 @@ const Overview = () => {
         const fetchOeeData = async () => {
             setOeeLoading(true);
             try {
-                const start = `${oeeDate}T00:00:00Z`;
-                const end = `${oeeDate}T23:59:59Z`;
-                const res = await productionApi.getOeeSummary({ datetime_start_time: start, datetime_end_time: end });
-                const data = res?.data?.data || res?.data?.results || res?.data || [];
-                setOeeReports(data.filter(r => !r.pet_name?.toLowerCase().includes('can')));
+                const res = await productionApi.getReports({ start_date: oeeDate, end_date: oeeDate, page_size: 1000 });
+                const reports = (Array.isArray(res.data) ? res.data : []).filter(r => !r.pet_name?.toLowerCase().includes('can'));
+                const withMetrics = await Promise.all(reports.map(async (r) => {
+                    try {
+                        const m = await productionApi.getReportOeeMetrics(r.id);
+                        const md = m.data?.data || m.data || {};
+                        return { ...r, metrics: { availability: md.availability || 0, performance: md.efficiency || 0, quality: md.quality || 0, oee: md.oee || 0, details: md.details || {} } };
+                    } catch { return { ...r, metrics: null }; }
+                }));
+                setOeeReports(withMetrics);
             } catch (e) {
                 console.error('Error fetching OEE data:', e);
                 setOeeReports([]);
@@ -302,16 +294,23 @@ const Overview = () => {
 
             const [shiftReportsRes, shiftOeeRes] = await Promise.all([
                 productionApi.getStoppagesSummary(shiftParams),
-                productionApi.getOeeSummary({ start_date: refDateStr, end_date: refDateStr, shift_name: targetShift.name, page_size: 1000 })
+                productionApi.getReports({ start_date: refDateStr, end_date: refDateStr, page_size: 1000 })
             ]);
 
-            // OEE data for performance gauges
-            const oeeData = shiftOeeRes?.data?.data || shiftOeeRes?.data?.results || shiftOeeRes?.data || [];
-            setShiftOeeReports(oeeData.filter(r => !r.pet_name?.toLowerCase().includes('can')));
+            // Fetch OEE metrics for each report matching this shift
+            const shiftReportsList = (Array.isArray(shiftOeeRes.data) ? shiftOeeRes.data : []).filter(r => !r.pet_name?.toLowerCase().includes('can') && r.shift_name === targetShift.name);
+            const oeeData = await Promise.all(shiftReportsList.map(async (r) => {
+                try {
+                    const m = await productionApi.getReportOeeMetrics(r.id);
+                    const md = m.data?.data || m.data || {};
+                    return { ...r, metrics: { availability: md.availability || 0, performance: md.efficiency || 0, quality: md.quality || 0, oee: md.oee || 0, details: md.details || {} } };
+                } catch { return { ...r, metrics: null }; }
+            }));
+            setShiftOeeReports(oeeData.filter(r => r.metrics));
             
-            // Handle nested response: response.data.data contains the actual data object
-            const outerData = shiftReportsRes?.data?.data || shiftReportsRes?.data || {};
-            const stoppagesArray = outerData.data || [];
+            // Handle nested response: response.data is already unwrapped
+            const outerData = shiftReportsRes?.data || {};
+            const stoppagesArray = outerData.data || outerData.results || [];
             const shiftReports = stoppagesArray.filter(r => !r.pet_name?.toLowerCase().includes('can'));
             
             const overallTotals = outerData.overall_totals || {};
@@ -427,10 +426,9 @@ const Overview = () => {
         const totalRejects = reports.reduce((s, r) => s + (r.metrics?.details?.rejects_pcs || 0), 0);
 
         const availability = reports.length > 0 ? reports.reduce((s, r) => s + (r.metrics?.availability || 0), 0) / reports.length : 0;
-        const operationalTime = totalPlannedMins - plannedDowntime;
-        const performance = operationalTime > 0 ? ((totalPlannedMins - totalDowntime) / operationalTime) * 100 : 0;
+        const performance = reports.length > 0 ? reports.reduce((s, r) => s + (r.metrics?.performance || 0), 0) / reports.length : 0;
         const quality = reports.length > 0 ? reports.reduce((s, r) => s + (r.metrics?.quality || 0), 0) / reports.length : 0;
-        const oeeValue = reports.length > 0 ? (availability / 100) * (performance / 100) * (quality / 100) * 100 : 0;
+        const oeeValue = reports.length > 0 ? (clamp(availability) / 100) * (clamp(performance) / 100) * (clamp(quality) / 100) * 100 : 0;
 
         const oee = {
             availability: clamp(availability),
@@ -649,6 +647,25 @@ const Overview = () => {
             }
         });
 
+        // Also populate from reports data (shiftOeeReports) for production/downtime when stoppages summary is empty
+        shiftOeeReports.forEach(r => {
+            const name = r.pet_name;
+            if (!name) return;
+            if (!lineMap[name]) {
+                lineMap[name] = { name, reports: 0, oee: 0, production: 0, downtime: 0, plannedDowntime: 0, plannedTimeMins: 0, efficiency: 0 };
+            }
+            const l = lineMap[name];
+            if (l.reports === 0) {
+                // Only fill from reports if stoppages didn't provide data
+                l.reports = 1;
+                l.production = r.total_bottles_produced || r.metrics?.details?.total_output_pcs || 0;
+                l.downtime = r.total_downtime_minutes || r.metrics?.details?.total_downtime_mins || 0;
+                l.plannedDowntime = r.metrics?.details?.planned_downtime_mins || 0;
+                l.plannedTimeMins = r.metrics?.details?.planned_time_mins || 0;
+                l.oee = r.metrics?.oee || 0;
+            }
+        });
+
         // Compute elapsed time since shift start
         let elapsedMins = shiftMins;
         if (currentShiftInfo?.start_time && shiftFilterDate) {
@@ -661,7 +678,8 @@ const Overview = () => {
         return Object.values(lineMap).map(l => {
             // Performance uses elapsed time instead of full planned time
             const oee = oeeByPet[l.name?.toLowerCase()];
-            const actualTime = l.reports > 0 ? elapsedMins : 0;
+            const stoppages = rawStoppages.filter(s => s.pet_name === l.name).length;
+            const actualTime = stoppages * 60;
             const totalDT = oee?.totalDowntime > 0 ? oee.totalDowntime : l.downtime;
             const plannedDT = oee?.plannedDowntime > 0 ? oee.plannedDowntime : l.plannedDowntime;
             const operationalTime = actualTime - plannedDT;
@@ -675,6 +693,7 @@ const Overview = () => {
             perfRaw: { plannedTime, totalDowntime: totalDT, plannedDowntime: plannedDT, mechDowntime: oee?.mechDowntime || 0 },
             production: l.production,
             downtime: l.downtime,
+            stoppageCount: rawStoppages.filter(s => s.pet_name === l.name).length,
             lastUpdated: l.lastUpdated ? l.lastUpdated.toLocaleString('en-US', {
                 month: 'short',
                 day: 'numeric',
@@ -699,9 +718,9 @@ const Overview = () => {
     const shiftDateLabel = new Date(shiftFilterDate + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     const runningLinesCount = hourlyOeeByLine.filter(line => line.reports > 0 && line.production > 0).length;
     return (
-        <div style={{ background: '#e9eff6', minHeight: '100vh', padding: '20px 24px' }}>
+        <div style={{ background: '#e9eff6', minHeight: '100vh', padding: '10px 14px' }}>
             {/* ── Top Bar ─────────────────────────── */}
-            <div className="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-3 pb-3" style={{ borderBottom: '1px solid #d7deea' }}>
+            <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2 pb-2" style={{ borderBottom: '1px solid #d7deea' }}>
                 <div className="d-flex align-items-center gap-3">
                     <img src="/logo.jpeg" alt="Logo" style={{ height: 42, borderRadius: 8 }} />
                     <div>
@@ -742,14 +761,14 @@ const Overview = () => {
             )}
 
             {/* ── Executive Strip ─────────────────── */}
-            <div className="rounded-3 p-3 mb-3" style={{ background: 'linear-gradient(135deg, #0f172a 0%, #1d4ed8 100%)', boxShadow: '0 10px 30px rgba(15,23,42,0.25)' }}>
-                <div className="row g-3 align-items-stretch">
-                    <div className="col-12 col-xl-4">
+            <div className="rounded-3 p-2 mb-2" style={{ background: 'linear-gradient(135deg, #0f172a 0%, #1d4ed8 100%)', boxShadow: '0 10px 30px rgba(15,23,42,0.25)' }}>
+                <div className="row g-2 align-items-stretch">
+                    <div className="col-auto">
                         <div className="h-100 rounded-3 p-3 d-flex align-items-center justify-content-between" style={{ background: 'rgba(255,255,255,0.12)' }}>
                             <div>
-                                <div style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.7)', fontWeight: 600 }}>Overall Efficiency</div>
+                                <div style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.7)', fontWeight: 600 }}>Overall Equipment Effectiveness</div>
                                 <div style={{ fontSize: '2.4rem', fontWeight: 800, color: '#fff', lineHeight: 1.1 }}>{oee.oee.toFixed(1)}%</div>
-                                <div style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.7)' }}>{activeDateLabel}</div>
+                                <div style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.7)' }}>Yesterday</div>
                             </div>
                             <div className="text-end">
                                 <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.78)' }}>Running Lines</div>
@@ -758,13 +777,15 @@ const Overview = () => {
                         </div>
                     </div>
                     {[
+                        { label: 'Stoppages Today', value: rawStoppages.length, icon: 'ti-alert-triangle', onClick: () => setShowReportsModal(true) },
                         { label: 'Production Time', value: `${(oee.rawValues?.plannedMins ? (oee.rawValues.plannedMins / 60).toFixed(1) : '0')}h`, icon: 'ti-clock-hour-4' },
                         { label: 'Pallets', value: formatN(stats.totalProduced ? Math.round(stats.totalProduced / 2880) : 0), icon: 'ti-package' },
-                        { label: 'Packages', value: formatN(stats.totalProduced ? Math.round(stats.totalProduced / 24) : 0), icon: 'ti-packages' },
+                        { label: 'Packs', value: formatN(stats.totalProduced ? Math.round(stats.totalProduced / 24) : 0), icon: 'ti-packages' },
                         { label: 'Bottles', value: formatN(stats.totalProduced), icon: 'ti-bottle' },
                     ].map(kpi => (
-                        <div key={kpi.label} className="col-6 col-md-3 col-xl-2">
-                            <div className="h-100 d-flex align-items-center gap-2 p-3 rounded-3" style={{ background: 'rgba(255,255,255,0.12)' }}>
+                        <div key={kpi.label} className="col">
+                            <div className="h-100 d-flex align-items-center gap-2 p-2 rounded-3" style={{ background: 'rgba(255,255,255,0.12)', cursor: kpi.onClick ? 'pointer' : 'default' }}
+                                onClick={kpi.onClick}>
                                 <i className={`ti ${kpi.icon}`} style={{ fontSize: '1.5rem', color: 'rgba(255,255,255,0.72)' }}></i>
                                 <div>
                                     <div style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.72)', fontWeight: 600 }}>{kpi.label}</div>
@@ -777,72 +798,71 @@ const Overview = () => {
             </div>
 
             {/* ── OEE Gauges ─────────────────────── */}
-            <div className="card mb-3">
-                <div className="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+            <div className="card mb-2">
+                <div className="card-header d-flex align-items-center justify-content-between flex-wrap gap-1 py-1">
                     <h6 className="mb-0">
                         Overall Equipment Effectiveness (Efficiency)
                         <span className="badge bg-soft-info text-info ms-2 fs-11">
                             <i className="ti ti-calendar me-1"></i>{oeeDate}
                         </span>
+                        <span className="badge bg-soft-primary text-primary ms-2 fs-11">
+                            <i className="ti ti-file-text me-1"></i>{rawStoppages.length} stoppage{rawStoppages.length !== 1 ? 's' : ''} today
+                        </span>
                     </h6>
-                    <input type="date" className="form-control form-control-sm" value={oeeDate}
-                        onChange={(e) => setOeeDate(e.target.value)}
-                        max={new Date(Date.now() - 86400000).toISOString().split('T')[0]}
-                        style={{ width: 'auto' }} />
+                    <div className="d-flex align-items-center gap-2">
+                        <input type="date" className="form-control form-control-sm" value={oeeDate}
+                            onChange={(e) => setOeeDate(e.target.value)}
+                            max={new Date(Date.now() - 86400000).toISOString().split('T')[0]}
+                            style={{ width: 'auto' }} />
+                        <button className="btn btn-sm btn-outline-primary" onClick={() => setShowReportsModal(true)}>
+                            <i className="ti ti-alert-triangle me-1"></i>View Stoppages
+                        </button>
+                    </div>
                 </div>
-                <div className="card-body">
+                <div className="card-body py-2">
                     {oeeLoading ? (
-                        <div className="text-center py-5"><div className="spinner-border text-primary" role="status" /></div>
-                    ) : !error && oeeReports.length === 0 ? (
-                        <div className="alert alert-warning d-flex align-items-center">
-                            <i className="ti ti-alert-circle fs-4 me-2"></i>
-                            <div><strong>No data available</strong> for {oeeDate}. Please select a different date.</div>
-                        </div>
+                        <div className="text-center py-3"><div className="spinner-border text-primary" role="status" /></div>
                     ) : (
-                    <div className="row g-3">
-                        <div className="col-lg-3 col-sm-6 d-flex justify-content-center">
+                    <div className="row g-2">
+                        <div className="col-lg-4 col-sm-6 d-flex justify-content-center">
                             <OeeGauge value={oee.availability} label="Availability"
                                 calculation={oee.rawValues ? `(${Number(oee.rawValues.plannedMins||0).toFixed(0)} - ${Number(oee.rawValues.totalDowntimeMins||0).toFixed(0)}) / (${Number(oee.rawValues.plannedMins||0).toFixed(0)} - ${Number(oee.rawValues.mechDowntimeMins||0).toFixed(0)}) × 100 = ${oee.availability.toFixed(1)}%` : ''}
                                 rawValues={oee.rawValues ? { display: `(${Number(oee.rawValues.plannedMins||0).toFixed(0)} - ${Number(oee.rawValues.totalDowntimeMins||0).toFixed(0)}) / (${Number(oee.rawValues.plannedMins||0).toFixed(0)} - ${Number(oee.rawValues.mechDowntimeMins||0).toFixed(0)}) × 100`, reason: oee.availability === 0 ? (oee.rawValues.plannedMins === 0 ? 'Planned Time = 0' : 'Availability = 0%') : null } : null} />
                         </div>
-                        <div className="col-lg-3 col-sm-6 d-flex justify-content-center">
+                        <div className="col-lg-4 col-sm-6 d-flex justify-content-center">
                             <OeeGauge value={oee.quality} label="Quality"
                                 calculation={oee.rawValues ? `(${Number(oee.rawValues.totalProduction||0).toLocaleString()} - ${Number(oee.rawValues.fillerRejects||0).toLocaleString()}) / ${Number(oee.rawValues.totalProduction||0).toLocaleString()} × 100 = ${oee.quality.toFixed(1)}%` : ''}
                                 rawValues={oee.rawValues ? { display: `(${Number(oee.rawValues.totalProduction||0).toLocaleString()} - ${Number(oee.rawValues.fillerRejects||0).toLocaleString()}) / ${Number(oee.rawValues.totalProduction||0).toLocaleString()} × 100`, reason: oee.quality === 0 ? (oee.rawValues.totalProduction === 0 ? 'Total Production = 0' : 'Quality = 0%') : null } : null} />
                         </div>
-                        <div className="col-lg-3 col-sm-6 d-flex justify-content-center">
+                        <div className="col-lg-4 col-sm-6 d-flex justify-content-center">
                             <OeeGauge value={oee.performance} label="Performance"
                                 calculation={oee.rawValues ? `(${Number(oee.rawValues.plannedMins||0).toFixed(0)} - ${Number(oee.rawValues.totalDowntimeMins||0).toFixed(0)}) / (${Number(oee.rawValues.plannedMins||0).toFixed(0)} - ${Number(oee.rawValues.plannedDowntimeMins||0).toFixed(0)}) × 100 = ${oee.performance.toFixed(1)}%` : ''}
                                 rawValues={oee.rawValues ? { display: `(${Number(oee.rawValues.plannedMins||0).toFixed(0)} - ${Number(oee.rawValues.totalDowntimeMins||0).toFixed(0)}) / (${Number(oee.rawValues.plannedMins||0).toFixed(0)} - ${Number(oee.rawValues.plannedDowntimeMins||0).toFixed(0)}) × 100`, reason: oee.performance === 0 ? 'Operational Time = 0' : null } : null} />
-                        </div>
-                        <div className="col-lg-3 col-sm-6 d-flex justify-content-center">
-                            <OeeGauge value={oee.oee} label="Efficiency"
-                                calculation={`${(oee.availability/100).toFixed(3)} × ${(oee.quality/100).toFixed(3)} × ${(oee.performance/100).toFixed(3)} = ${oee.oee.toFixed(1)}%`}
-                                rawValues={{ display: `${(oee.availability/100).toFixed(3)} × ${(oee.quality/100).toFixed(3)} × ${(oee.performance/100).toFixed(3)}`, reason: oee.oee === 0 ? (oee.availability === 0 ? 'Availability = 0%' : oee.quality === 0 ? 'Quality = 0%' : 'Performance = 0%') : null }} />
                         </div>
                     </div>
                     )}
                 </div>
             </div>
 
+            {/* ── Yesterday vs Today Comparison ──── */}
+            <YesterdayTodayComparison />
+
             {/* ── Shift + Production Lines ────────── */}
-            <div className="rounded-3 p-2" style={{ background: '#fff', boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
+            <div className="rounded-3 px-2 py-1" style={{ background: '#fff', boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
             {/* ── Shift Label ─────────────────────── */}
-            <div className="d-flex align-items-start justify-content-between mb-2">
-                <div>
-                    <div className="d-flex align-items-center gap-2 mb-1">
-                        <h6 className="mb-0 fw-bold" style={{ fontSize: '1.05rem' }}>Shift Production Metrics</h6>
-                        {currentShiftInfo && (
-                            <span className="badge bg-primary" style={{ fontSize: '0.75rem' }}>{currentShiftInfo.name}</span>
-                        )}
-                    </div>
+            <div className="d-flex align-items-center justify-content-between mb-1 flex-wrap gap-1">
+                <div className="d-flex align-items-center gap-2 flex-wrap">
+                    <h6 className="mb-0 fw-bold" style={{ fontSize: '1.05rem' }}>Shift Production Metrics</h6>
+                    {currentShiftInfo && (
+                        <span className="badge bg-primary" style={{ fontSize: '0.75rem' }}>{currentShiftInfo.name}</span>
+                    )}
                     {currentShiftInfo?.lastUpdated && (
-                        <div style={{ fontSize: '0.8rem', color: '#64748b' }}>Last Updated: {currentShiftInfo.lastUpdated}</div>
+                        <span style={{ fontSize: '0.8rem', color: '#64748b' }}>| Last Updated: {currentShiftInfo.lastUpdated}</span>
                     )}
                     {currentShiftInfo?.start_time && currentShiftInfo?.end_time && (
-                        <div style={{ fontSize: '0.8rem', color: '#64748b' }}>
-                            Shift Time: {shiftDateLabel} {currentShiftInfo.start_time.slice(0,5)} - {currentShiftInfo.end_time.slice(0,5)}
-                        </div>
+                        <span style={{ fontSize: '0.8rem', color: '#64748b' }}>
+                            | Shift: {shiftDateLabel} {currentShiftInfo.start_time.slice(0,5)} - {currentShiftInfo.end_time.slice(0,5)}
+                        </span>
                     )}
                 </div>
                 <div className="d-flex align-items-center gap-2">
@@ -871,7 +891,7 @@ const Overview = () => {
             <div className="row g-2">
                 {/* Individual line cards */}
                 {hourlyOeeByLine.map((line) => {
-                    const eff = line.reports > 0 ? line.oee : 0;
+                    const eff = line.reports > 0 ? line.performance : 0;
                     const isRunning = line.reports > 0 && line.production > 0;
                     const borderColor = eff >= 85 ? '#4caf50' : eff >= 60 ? '#ff9800' : eff > 0 ? '#f44336' : '#e0e0e0';
                     return (
@@ -891,6 +911,12 @@ const Overview = () => {
                                 </span>
                                 <div style={{ fontSize: '0.7rem', color: '#555', fontWeight: 600 }}>
                                     <i className="ti ti-bottle me-1"></i>{formatN(Math.round(line.production))}
+                                </div>
+                                <div style={{ fontSize: '0.7rem', color: '#dc2626', fontWeight: 600 }}>
+                                    <i className="ti ti-clock-pause me-1"></i>{formatN(Math.round(line.downtime))}m
+                                </div>
+                                <div style={{ fontSize: '0.7rem', color: '#e65100', fontWeight: 600 }}>
+                                    <i className="ti ti-alert-triangle me-1"></i>{line.stoppageCount} stoppage{line.stoppageCount !== 1 ? 's' : ''}
                                 </div>
                                 <div style={{ fontSize: '0.6rem', color: '#94a3b8', marginTop: 2 }}>tap for details</div>
                             </div>
@@ -928,7 +954,6 @@ const Overview = () => {
                         {/* Gauge row */}
                         <div className="d-flex justify-content-around mb-3">
                             {[
-                                { label: 'Efficiency', value: selectedLine.oee },
                                 { label: 'Performance', value: selectedLine.performance },
                             ].map(m => {
                                 const c = gaugeColor(m.value);
@@ -944,28 +969,20 @@ const Overview = () => {
                         <div className="rounded-3 p-2 mb-3" style={{ background: '#f8fafc', fontSize: '0.75rem', color: '#64748b' }}>
                             <div className="fw-bold mb-1" style={{ color: '#334155' }}>Performance Formula</div>
                             <div className="font-monospace" style={{ fontSize: '0.7rem' }}>
-                                (Elapsed Time − Total Downtime) / (Elapsed Time − Planned Downtime) × 100
+                                (Stoppages × 60 − Total Downtime) / (Stoppages × 60 − Planned Downtime) × 100
                             </div>
                             <div className="font-monospace mt-1" style={{ fontSize: '0.7rem', color: '#1565c0' }}>
                                 ({(() => {
-                                    const elapsed = currentShiftInfo?.start_time && shiftFilterDate
-                                        ? Math.max(0, Math.round((new Date() - new Date(`${shiftFilterDate}T${currentShiftInfo.start_time.slice(0,5)}:00`)) / 60000))
-                                        : Math.round(selectedLine.perfRaw?.plannedTime || 0);
+                                    const time = selectedLine.stoppageCount * 60;
                                     const td = Math.round(selectedLine.perfRaw?.totalDowntime || 0);
                                     const pd = Math.round(selectedLine.perfRaw?.plannedDowntime || 0);
-                                    return `${elapsed} − ${td}) / (${elapsed} − ${pd}) × 100 = ${selectedLine.performance.toFixed(1)}%`;
+                                    return `${selectedLine.stoppageCount} × 60 − ${td}) / (${time} − ${pd}) × 100 = ${selectedLine.performance.toFixed(1)}%`;
                                 })()}
                             </div>
                         </div>
                         {/* Detail rows */}
                         {[
-                            { label: 'Time Spent', value: (() => {
-                                if (!currentShiftInfo?.start_time || !shiftFilterDate) return 'N/A';
-                                const start = new Date(`${shiftFilterDate}T${currentShiftInfo.start_time.slice(0,5)}:00`);
-                                const now = new Date();
-                                const elapsed = Math.max(0, Math.round((now - start) / 60000));
-                                return `${elapsed} min`;
-                            })(), color: '#2e7d32' },
+                            { label: 'Time (Stoppages × 60)', value: `${selectedLine.stoppageCount * 60} min (${selectedLine.stoppageCount} stoppages)`, color: '#2e7d32' },
                             { label: 'Bottles Produced', value: formatN(Math.round(selectedLine.production)), color: '#1565c0' },
                             { label: 'Downtime', value: `${Math.round(selectedLine.downtime)} min`, color: selectedLine.downtime > 30 ? '#f44336' : '#4caf50' },
                             { label: 'Planned Time', value: `${Math.round(selectedLine.perfRaw?.plannedTime || 0)} min`, color: '#555' },
@@ -982,6 +999,65 @@ const Overview = () => {
                     </div>
                 </div>
             )}
+
+            {/* ── Reports Modal ────────────────────── */}
+            {showReportsModal && (
+                <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.6)', backdropFilter: 'blur(4px)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                    onClick={() => setShowReportsModal(false)}>
+                    <div className="rounded-4 p-4" style={{ background: '#fff', width: 600, maxWidth: '95vw', maxHeight: '80vh', overflow: 'auto', boxShadow: '0 25px 50px rgba(0,0,0,0.25)' }}
+                        onClick={e => e.stopPropagation()}>
+                        <div className="d-flex align-items-center justify-content-between mb-3">
+                            <h5 className="mb-0 fw-bold"><i className="ti ti-alert-triangle me-2 text-warning"></i>Stoppage Reports ({rawStoppages.length})</h5>
+                            <button className="btn btn-sm btn-light" onClick={() => setShowReportsModal(false)} style={{ borderRadius: '50%', width: 32, height: 32, padding: 0 }}>
+                                <i className="ti ti-x"></i>
+                            </button>
+                        </div>
+                        {rawStoppages.length === 0 ? (
+                            <div className="text-center py-4 text-muted">No stoppages reported today</div>
+                        ) : (
+                            <table className="table table-sm table-hover mb-0" style={{ fontSize: '0.8rem' }}>
+                                <thead>
+                                    <tr style={{ color: '#64748b' }}>
+                                        <th>PET Line</th>
+                                        <th>Hour</th>
+                                        <th>Time</th>
+                                        <th>Duration</th>
+                                        <th>Downtime (min)</th>
+                                        <th>Category</th>
+                                        <th>Description</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {rawStoppages.map(s => (
+                                        <tr key={s.id}>
+                                            <td className="fw-bold">{s.pet_name}</td>
+                                            <td>Hour {s.hour_index ?? '—'}</td>
+                                            <td>{s.start_time || s.log_time || '—'}</td>
+                                            <td>{s.duration ? `${s.duration}m` : '—'}</td>
+                                            <td style={{ color: '#dc2626', fontWeight: 600 }}>{s.downtime_minutes || 0}</td>
+                                            <td>{s.incidents?.[0]?.downtime_category_name || s.incidents?.[0]?.sub_downtime_category_name || '—'}</td>
+                                            <td style={{ maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.incidents?.[0]?.incident_description || s.comments || '—'}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {/* Floating Refresh Button */}
+            <button
+                onClick={loadData}
+                disabled={refreshing}
+                style={{ position: 'fixed', bottom: 24, right: 24, width: 50, height: 50, borderRadius: '50%', border: 'none', background: '#1d4ed8', color: '#fff', boxShadow: '0 4px 14px rgba(29,78,216,0.4)', cursor: 'pointer', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'transform 0.2s' }}
+                onMouseEnter={e => e.currentTarget.style.transform = 'scale(1.1)'}
+                onMouseLeave={e => e.currentTarget.style.transform = ''}
+                title="Refresh data"
+            >
+                <i className={`ti ti-refresh fs-4${refreshing ? ' spin' : ''}`}></i>
+                <style>{`.spin{animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+            </button>
         </div>
     );
 };

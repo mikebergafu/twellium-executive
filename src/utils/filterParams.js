@@ -12,21 +12,16 @@ export const buildFilterParams = (filters = {}, forStoppages = false) => {
       params.end_date = filters.end_date;
     }
   } else {
-    // Reports API uses datetime format without milliseconds
+    // Reports/OEE API uses production_date or start_date/end_date
     if (filters.start_date && filters.end_date) {
-      const start = new Date(filters.start_date + 'T00:00:00Z');
-      const end = new Date(filters.end_date + 'T23:59:59Z');
-      params.datetime_start_time = start.toISOString().replace(/\.\d{3}Z$/, 'Z');
-      params.datetime_end_time = end.toISOString().replace(/\.\d{3}Z$/, 'Z');
+      params.start_date = filters.start_date;
+      params.end_date = filters.end_date;
     } else if (filters.log_date) {
-      const start = new Date(filters.log_date + 'T00:00:00Z');
-      const end = new Date(filters.log_date + 'T23:59:59Z');
-      params.datetime_start_time = start.toISOString().replace(/\.\d{3}Z$/, 'Z');
-      params.datetime_end_time = end.toISOString().replace(/\.\d{3}Z$/, 'Z');
+      params.production_date = filters.log_date;
     }
   }
   
-  if (filters.pet) params.pet_id = filters.pet;
+  if (filters.pet) params.pet = filters.pet;
   if (filters.shift) params.shift_name = filters.shift;
   
   return params;

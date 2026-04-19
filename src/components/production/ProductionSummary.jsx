@@ -33,15 +33,16 @@ const ProductionSummary = ({ reports = [], loading = false, pets = [] }) => {
             const fetchPeriodData = async () => {
                 setPeriodLoading(true);
                 try {
-                    const params = {
-                        start_date: localStartDate,
-                        end_date: localEndDate,
-                        page_size: 1000
-                    };
-                    
-                    const response = await productionApi.getOeeSummary(params);
-                    const data = response?.data?.data || response?.data?.results || response?.data || [];
-                    setPeriodReports(data.filter(r => !r.pet_name?.toLowerCase().includes('can')));
+                    const res = await productionApi.getReports({ start_date: localStartDate, end_date: localEndDate, page_size: 1000 });
+                    const reports = (Array.isArray(res.data) ? res.data : []).filter(r => !r.pet_name?.toLowerCase().includes('can'));
+                    const withMetrics = await Promise.all(reports.map(async (r) => {
+                        try {
+                            const m = await productionApi.getReportOeeMetrics(r.id);
+                            const md = m.data?.data || m.data || {};
+                            return { ...r, metrics: { availability: md.availability || 0, performance: md.efficiency || 0, quality: md.quality || 0, oee: md.oee || 0, details: md.details || {} } };
+                        } catch { return { ...r, metrics: null }; }
+                    }));
+                    setPeriodReports(withMetrics);
                 } catch (error) {
                     console.error('Error fetching period data:', error);
                     setPeriodReports([]);

@@ -45,7 +45,7 @@ const StoppageIncidentsChart = () => {
                 }
                 
                 const res = await productionApi.getStoppages(params);
-                const data = res.data?.data || res.data?.results || res.data || [];
+                const data = Array.isArray(res.data) ? res.data : (res.data?.results || []);
                 const filtered = (Array.isArray(data) ? data : []).filter(s => !(s.pet_name || s.line_name || '').toLowerCase().includes('can'));
                 setStoppages(filtered);
             } catch (err) {

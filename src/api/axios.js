@@ -26,7 +26,14 @@ api.interceptors.request.use(
 
 
 api.interceptors.response.use(
-    (response) => response,
+    (response) => {
+        // Unwrap the API envelope { status_code, message, data } so that
+        // response.data points directly at the inner payload.
+        if (response.data && typeof response.data === 'object' && 'status_code' in response.data && 'data' in response.data) {
+            response.data = response.data.data;
+        }
+        return response;
+    },
     async (error) => {
         const originalRequest = error.config;
 
@@ -41,8 +48,10 @@ api.interceptors.response.use(
                         refresh: refreshToken,
                     });
 
-                    localStorage.setItem('access_token', data.data.access);
-                    api.defaults.headers.common['Authorization'] = `Bearer ${data.data.access}`;
+                    // Direct axios call doesn't use our interceptor, so unwrap manually
+                    const tokenData = data?.data || data;
+                    localStorage.setItem('access_token', tokenData.access);
+                    api.defaults.headers.common['Authorization'] = `Bearer ${tokenData.access}`;
 
                     return api(originalRequest);
                 } catch (refreshError) {

@@ -11,13 +11,3 @@ export const logout = () => {
     localStorage.removeItem('user');
     window.location.href = '/login';
 };
-
-export const forgotPassword = async (email) => {
-    const response = await api.post('/core/auth/forgot-password/', { email });
-    return response.data;
-};
-
-export const resetPassword = async (data) => {
-    const response = await api.post('/core/auth/reset-password/', data);
-    return response.data;
-};
