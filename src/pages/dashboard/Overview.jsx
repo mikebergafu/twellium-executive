@@ -689,7 +689,7 @@ const Overview = () => {
         return Object.values(lineMap).map(l => {
             // Performance uses elapsed time instead of full planned time
             const oee = oeeByPet[l.name?.toLowerCase()];
-            const stoppages = rawStoppages.filter(s => s.pet_name === l.name).length;
+            const stoppages = rawStoppages.filter(s => s.pet_name === l.name && (s.report_code || '').toUpperCase().includes(currentShiftInfo?.name?.toUpperCase())).length;
             const actualTime = stoppages * 60;
             const totalDT = oee?.totalDowntime > 0 ? oee.totalDowntime : l.downtime;
             const perf = actualTime > 0 ? ((actualTime - totalDT) / actualTime) * 100 : 0;
@@ -702,7 +702,7 @@ const Overview = () => {
             perfRaw: { plannedTime, totalDowntime: totalDT, mechDowntime: oee?.mechDowntime || 0 },
             production: l.production,
             downtime: l.downtime,
-            stoppageCount: rawStoppages.filter(s => s.pet_name === l.name).length,
+            stoppageCount: rawStoppages.filter(s => s.pet_name === l.name && (s.report_code || '').toUpperCase().includes(currentShiftInfo?.name?.toUpperCase())).length,
             lastUpdated: l.lastUpdated ? l.lastUpdated.toLocaleString('en-US', {
                 month: 'short',
                 day: 'numeric',
@@ -717,7 +717,7 @@ const Overview = () => {
             const bNum = parseInt(b.name?.match(/(\d+)/)?.[0] || '999');
             return aNum - bNum;
         });
-    }, [hourlyReports, rawPets, currentShiftInfo, shiftOeeReports, shiftFilterDate]);
+    }, [hourlyReports, rawPets, rawStoppages, currentShiftInfo, shiftOeeReports, shiftFilterDate]);
 
     const gaugeColor = (v) => v >= 85 ? '#22c55e' : v >= 60 ? '#f59e0b' : '#ef4444';
     const isLoading = initialLoading || refreshing;
