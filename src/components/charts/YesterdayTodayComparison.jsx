@@ -66,7 +66,7 @@ const YesterdayTodayComparison = () => {
         const bg = diff === 0 ? '#f1f5f9' : good ? '#f0fdf4' : '#fef2f2';
         const fmt = (v) => unit === '%' ? v.toFixed(1) + '%' : v.toLocaleString();
         const deltaLabel = unit === '%'
-            ? `${Math.abs(diff).toFixed(1)}pp`
+            ? `${diff > 0 ? '+' : ''}${diff.toFixed(1)}%`
             : (yesterdayVal === 0 ? '—' : `${Math.abs(((todayVal - yesterdayVal) / yesterdayVal) * 100).toFixed(1)}%`);
         return (
             <div className="col">
