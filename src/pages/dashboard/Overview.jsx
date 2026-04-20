@@ -836,20 +836,21 @@ const Overview = () => {
                                 const active = oeeByLine.filter(l => l.reports > 0);
                                 const sorted = active.length ? [...active].sort((a, b) => a.oee - b.oee) : [];
                                 const low = sorted[0], high = sorted[sorted.length - 1];
+                                const sameLine = high && low && high.name === low.name;
                                 return <>
                                 <div>
                                     <div style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.7)', fontWeight: 600 }}>Overall Equipment Effectiveness <span style={{ color: 'rgba(255,255,255,0.5)' }}>— Yesterday</span></div>
                                     {high ? (
                                         <>
                                             <div style={{ fontSize: '2rem', fontWeight: 800, color: '#4ade80', lineHeight: 1.1 }}>▲ {high.oee.toFixed(1)}%</div>
-                                            <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.7)' }}>Highest — {high.name}</div>
+                                            <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.7)' }}>{sameLine ? `${high.name} (only line)` : `Highest — ${high.name}`}</div>
                                         </>
                                     ) : (
                                         <div style={{ fontSize: '2rem', fontWeight: 800, color: '#fff', lineHeight: 1.1 }}>0.0%</div>
                                     )}
                                 </div>
                                 <div className="text-end">
-                                    {low ? (
+                                    {low && !sameLine ? (
                                         <>
                                             <div style={{ fontSize: '2rem', fontWeight: 800, color: '#f87171', lineHeight: 1.1 }}>▼ {low.oee.toFixed(1)}%</div>
                                             <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.7)' }}>Lowest — {low.name}</div>
