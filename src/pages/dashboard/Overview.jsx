@@ -87,7 +87,9 @@ const Overview = () => {
 
     // Independent OEE gauges date filter (defaults to previous day)
     const [oeeDate, setOeeDate] = useState(() => {
-        return new Date().toISOString().split('T')[0];
+        const d = new Date();
+        d.setDate(d.getDate() - 1);
+        return d.toISOString().split('T')[0];
     });
     const [oeeReports, setOeeReports] = useState([]);
     const [oeeLoading, setOeeLoading] = useState(false);
@@ -230,7 +232,17 @@ const Overview = () => {
                     }
                     return { ...r, metrics: { availability: 0, performance: 0, quality: 100, oee: 0, details: {} } };
                 }));
-                setOeeReports(merged);
+                // Add entries for PETs that have stoppages but no reports
+                const reportedPets = new Set(merged.map(r => r.pet_name));
+                Object.values(petMap).forEach(sp => {
+                    if (!reportedPets.has(sp.pet_name)) {
+                        const avgEff = sp.count > 0 ? sp.efficiency / sp.count : 0;
+                        const time = sp.count * 60;
+                        const perf = time > 0 ? ((time - sp.downtime) / time) * 100 : 0;
+                        merged.push({ pet_name: sp.pet_name, shift_name: '', report_code: '', metrics: { availability: avgEff, performance: perf, quality: 100, oee: (avgEff / 100) * (perf / 100) * 100, details: { total_output_pcs: sp.bottles, total_downtime_mins: sp.downtime, planned_time_mins: time, mechanical_downtime_mins: sp.downtime, planned_downtime_mins: 0, rejects_pcs: 0 } } });
+                    }
+                });
+                setOeeReports([...merged]);
             } catch (e) {
                 console.error('Error fetching OEE data:', e);
                 setOeeReports([]);
