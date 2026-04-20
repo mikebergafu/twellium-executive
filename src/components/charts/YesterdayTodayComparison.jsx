@@ -3,22 +3,14 @@ import { productionApi } from '../../api/production';
 
 const clamp = (v) => Math.min(100, Math.max(0, v));
 
-const fetchReportsWithMetrics = async (dateStr) => {
-    const res = await productionApi.getReports({ start_date: dateStr, end_date: dateStr, page_size: 1000 });
-    const reports = (Array.isArray(res.data) ? res.data : []).filter(r => !r.pet_name?.toLowerCase().includes('can'));
-    const withMetrics = await Promise.all(reports.map(async (r) => {
-        try {
-            const m = await productionApi.getReportOeeMetrics(r.id);
-            const md = m.data?.data || m.data || {};
-            return { ...r, metrics: { availability: md.availability || 0, performance: md.efficiency || 0, quality: md.quality || 0, oee: md.oee || 0, details: md.details || {} } };
-        } catch { return { ...r, metrics: null }; }
-    }));
-    return withMetrics.filter(r => r.metrics);
+const fetchDayData = async (dateStr) => {
+    const res = await productionApi.getStoppages({ log_date: dateStr, page_size: 1000 });
+    return (Array.isArray(res.data) ? res.data : []).filter(s => !(s.pet_name || '').toLowerCase().includes('can'));
 };
 
 const YesterdayTodayComparison = () => {
-    const [yesterdayReports, setYesterdayReports] = useState([]);
-    const [todayReports, setTodayReports] = useState([]);
+    const [yesterdayData, setYesterdayData] = useState([]);
+    const [todayData, setTodayData] = useState([]);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
@@ -30,11 +22,11 @@ const YesterdayTodayComparison = () => {
                 yesterday.setDate(yesterday.getDate() - 1);
                 const fmt = (d) => d.toISOString().split('T')[0];
                 const [yData, tData] = await Promise.all([
-                    fetchReportsWithMetrics(fmt(yesterday)),
-                    fetchReportsWithMetrics(fmt(today)),
+                    fetchDayData(fmt(yesterday)),
+                    fetchDayData(fmt(today)),
                 ]);
-                setYesterdayReports(yData);
-                setTodayReports(tData);
+                setYesterdayData(yData);
+                setTodayData(tData);
             } catch (e) { console.error('Comparison fetch error:', e); }
             finally { setLoading(false); }
         };
@@ -42,21 +34,19 @@ const YesterdayTodayComparison = () => {
     }, []);
 
     const data = useMemo(() => {
-        const agg = (reports) => {
-            if (!reports.length) return { efficiency: 0, availability: 0, quality: 0, performance: 0, production: 0, downtime: 0, lines: 0 };
-            const totalPlanned = reports.reduce((s, r) => s + (r.metrics?.details?.planned_time_mins || 0), 0);
-            const totalDT = reports.reduce((s, r) => s + (r.metrics?.details?.total_downtime_mins || 0), 0);
-            const plannedDT = reports.reduce((s, r) => s + (r.metrics?.details?.planned_downtime_mins || 0), 0);
-            const prod = reports.reduce((s, r) => s + (r.metrics?.details?.total_output_pcs || 0), 0);
-            const avail = reports.reduce((s, r) => s + (r.metrics?.availability || 0), 0) / reports.length;
-            const qual = reports.reduce((s, r) => s + (r.metrics?.quality || 0), 0) / reports.length;
-            const op = totalPlanned - plannedDT;
-            const perf = op > 0 ? ((totalPlanned - totalDT) / op) * 100 : 0;
-            const eff = (avail / 100) * (clamp(perf) / 100) * (qual / 100) * 100;
-            return { efficiency: clamp(eff), availability: clamp(avail), quality: clamp(qual), performance: clamp(perf), production: prod, downtime: Math.round(totalDT), lines: new Set(reports.map(r => r.pet_name).filter(Boolean)).size };
+        const agg = (stoppages) => {
+            if (!stoppages.length) return { efficiency: 0, availability: 0, quality: 0, performance: 0, production: 0, downtime: 0, lines: 0 };
+            const production = stoppages.reduce((s, r) => s + (r.bottles_produced || 0), 0);
+            const downtime = stoppages.reduce((s, r) => s + (r.downtime_minutes || 0), 0);
+            const avgEff = stoppages.reduce((s, r) => s + (parseFloat(r.efficiency) || 0), 0) / stoppages.length;
+            const time = stoppages.length * 60;
+            const perf = time > 0 ? ((time - downtime) / time) * 100 : 0;
+            const oee = (clamp(avgEff) / 100) * (clamp(perf) / 100) * 100;
+            const lines = new Set(stoppages.map(r => r.pet_name).filter(Boolean)).size;
+            return { efficiency: clamp(oee), availability: clamp(avgEff), quality: 100, performance: clamp(perf), production, downtime: Math.round(downtime), lines };
         };
-        return { yesterday: agg(yesterdayReports), today: agg(todayReports) };
-    }, [yesterdayReports, todayReports]);
+        return { yesterday: agg(yesterdayData), today: agg(todayData) };
+    }, [yesterdayData, todayData]);
 
     const Metric = ({ label, icon, todayVal, yesterdayVal, unit = '%', invertColor }) => {
         const diff = todayVal - yesterdayVal;
@@ -89,7 +79,7 @@ const YesterdayTodayComparison = () => {
     };
 
     if (loading) return <div className="card mb-3"><div className="card-body text-center py-3"><div className="spinner-border text-primary" /></div></div>;
-    if (!yesterdayReports.length && !todayReports.length) return null;
+    if (!yesterdayData.length && !todayData.length) return null;
 
     return (
         <div className="card mb-3">

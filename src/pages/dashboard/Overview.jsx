@@ -87,9 +87,7 @@ const Overview = () => {
 
     // Independent OEE gauges date filter (defaults to previous day)
     const [oeeDate, setOeeDate] = useState(() => {
-        const d = new Date();
-        d.setDate(d.getDate() - 1);
-        return d.toISOString().split('T')[0];
+        return new Date().toISOString().split('T')[0];
     });
     const [oeeReports, setOeeReports] = useState([]);
     const [oeeLoading, setOeeLoading] = useState(false);
@@ -193,16 +191,46 @@ const Overview = () => {
         const fetchOeeData = async () => {
             setOeeLoading(true);
             try {
-                const res = await productionApi.getReports({ start_date: oeeDate, end_date: oeeDate, page_size: 1000 });
-                const reports = (Array.isArray(res.data) ? res.data : []).filter(r => !r.pet_name?.toLowerCase().includes('can'));
-                const withMetrics = await Promise.all(reports.map(async (r) => {
+                // Fetch both reports (for OEE metrics) and stoppages (for real production data)
+                const [reportsRes, stoppagesRes] = await Promise.all([
+                    productionApi.getReports({ start_date: oeeDate, end_date: oeeDate, page_size: 1000 }),
+                    productionApi.getStoppages({ log_date: oeeDate, page_size: 1000 }),
+                ]);
+                const reports = (Array.isArray(reportsRes.data) ? reportsRes.data : []).filter(r => !r.pet_name?.toLowerCase().includes('can'));
+                const stoppages = (Array.isArray(stoppagesRes.data) ? stoppagesRes.data : []).filter(s => !(s.pet_name || '').toLowerCase().includes('can'));
+
+                // Build per-PET data from stoppages
+                const petMap = {};
+                stoppages.forEach(s => {
+                    const name = s.pet_name;
+                    if (!petMap[name]) petMap[name] = { pet_name: name, bottles: 0, downtime: 0, efficiency: 0, count: 0 };
+                    petMap[name].bottles += s.bottles_produced || 0;
+                    petMap[name].downtime += s.downtime_minutes || 0;
+                    petMap[name].efficiency += parseFloat(s.efficiency) || 0;
+                    petMap[name].count += 1;
+                });
+
+                // Merge: use report oee_metrics where available, fall back to stoppages
+                const merged = await Promise.all(reports.map(async (r) => {
                     try {
                         const m = await productionApi.getReportOeeMetrics(r.id);
                         const md = m.data?.data || m.data || {};
-                        return { ...r, metrics: { availability: md.availability || 0, performance: md.efficiency || 0, quality: md.quality || 0, oee: md.oee || 0, details: md.details || {} } };
-                    } catch { return { ...r, metrics: null }; }
+                        const hasData = md.availability > 0 || md.efficiency > 0 || (md.details?.total_output_pcs || 0) > 0;
+                        if (hasData) {
+                            return { ...r, metrics: { availability: md.availability || 0, performance: md.efficiency || 0, quality: md.quality || 0, oee: md.oee || 0, details: md.details || {} } };
+                        }
+                    } catch {}
+                    // Fallback to stoppages data
+                    const sp = petMap[r.pet_name];
+                    if (sp) {
+                        const avgEff = sp.count > 0 ? sp.efficiency / sp.count : 0;
+                        const time = sp.count * 60;
+                        const perf = time > 0 ? ((time - sp.downtime) / time) * 100 : 0;
+                        return { ...r, metrics: { availability: avgEff, performance: perf, quality: 100, oee: (avgEff / 100) * (perf / 100) * 100, details: { total_output_pcs: sp.bottles, total_downtime_mins: sp.downtime, planned_time_mins: time, mechanical_downtime_mins: sp.downtime, planned_downtime_mins: 0, rejects_pcs: 0 } } };
+                    }
+                    return { ...r, metrics: { availability: 0, performance: 0, quality: 100, oee: 0, details: {} } };
                 }));
-                setOeeReports(withMetrics);
+                setOeeReports(merged);
             } catch (e) {
                 console.error('Error fetching OEE data:', e);
                 setOeeReports([]);
@@ -413,12 +441,18 @@ const Overview = () => {
             stoppages = stoppages.filter(s => (s.pet_name || s.line_name || '') === selectedPet);
         }
 
-        /* Stats from reports (source of truth for downtime) */
-        const totalDowntime = reports.reduce((s, r) => s + (r.metrics?.details?.total_downtime_mins || 0), 0);
-        const mechDowntime = reports.reduce((s, r) => s + (r.metrics?.details?.mechanical_downtime_mins || 0), 0);
-        const plannedDowntime = reports.reduce((s, r) => s + (r.metrics?.details?.planned_downtime_mins || 0), 0);
+        /* Stats from reports + stoppages */
+        const reportDowntime = reports.reduce((s, r) => s + (r.metrics?.details?.total_downtime_mins || 0), 0);
+        const reportProduced = reports.reduce((s, r) => s + (r.metrics?.details?.total_output_pcs || 0), 0);
 
-        const totalProduced = reports.reduce((s, r) => s + (r.metrics?.details?.total_output_pcs || 0), 0);
+        // Stoppages have real-time production data
+        const stoppageDowntime = stoppages.reduce((s, r) => s + (r.downtime_minutes || 0), 0);
+        const stoppageProduced = stoppages.reduce((s, r) => s + (r.bottles_produced || 0), 0);
+
+        const totalDowntime = reportDowntime || stoppageDowntime;
+        const mechDowntime = reports.reduce((s, r) => s + (r.metrics?.details?.mechanical_downtime_mins || 0), 0) || stoppageDowntime;
+        const plannedDowntime = reports.reduce((s, r) => s + (r.metrics?.details?.planned_downtime_mins || 0), 0);
+        const totalProduced = reportProduced || stoppageProduced;
         const activeLines = selectedPet ? 1 : new Set(reports.map(r => r.pet_name).filter(Boolean)).size;
 
         const stats = {
@@ -432,14 +466,23 @@ const Overview = () => {
             totalProduced,
         };
 
-        /* Global OEE from API */
+        /* Global OEE — use report metrics if available, otherwise derive from stoppages */
         const totalPlannedMins = reports.reduce((s, r) => s + (r.metrics?.details?.planned_time_mins || 0), 0);
         const totalRejects = reports.reduce((s, r) => s + (r.metrics?.details?.rejects_pcs || 0), 0);
 
-        const availability = reports.length > 0 ? reports.reduce((s, r) => s + (r.metrics?.availability || 0), 0) / reports.length : 0;
-        const performance = reports.length > 0 ? reports.reduce((s, r) => s + (r.metrics?.performance || 0), 0) / reports.length : 0;
-        const quality = reports.length > 0 ? reports.reduce((s, r) => s + (r.metrics?.quality || 0), 0) / reports.length : 0;
-        const oeeValue = reports.length > 0 ? (clamp(availability) / 100) * (clamp(performance) / 100) * (clamp(quality) / 100) * 100 : 0;
+        const reportAvail = reports.length > 0 ? reports.reduce((s, r) => s + (r.metrics?.availability || 0), 0) / reports.length : 0;
+        const reportPerf = reports.length > 0 ? reports.reduce((s, r) => s + (r.metrics?.performance || 0), 0) / reports.length : 0;
+        const reportQual = reports.length > 0 ? reports.reduce((s, r) => s + (r.metrics?.quality || 0), 0) / reports.length : 0;
+
+        // Fallback: compute from stoppages when report metrics are 0
+        const stoppageEff = stoppages.length > 0 ? stoppages.reduce((s, r) => s + (parseFloat(r.efficiency) || 0), 0) / stoppages.length : 0;
+        const stoppageTime = stoppages.length * 60;
+        const stoppagePerf = stoppageTime > 0 ? ((stoppageTime - stoppageDowntime) / stoppageTime) * 100 : 0;
+
+        const availability = reportAvail || stoppageEff;
+        const performance = reportPerf || stoppagePerf;
+        const quality = reportQual || 100;
+        const oeeValue = (availability > 0 || performance > 0) ? (clamp(availability) / 100) * (clamp(performance) / 100) * (clamp(quality) / 100) * 100 : 0;
 
         const oee = {
             availability: clamp(availability),
@@ -821,7 +864,7 @@ const Overview = () => {
                     <div className="d-flex align-items-center gap-2">
                         <input type="date" className="form-control form-control-sm" value={oeeDate}
                             onChange={(e) => setOeeDate(e.target.value)}
-                            max={new Date(Date.now() - 86400000).toISOString().split('T')[0]}
+                            max={new Date().toISOString().split('T')[0]}
                             style={{ width: 'auto' }} />
                         <button className="btn btn-sm btn-outline-primary" onClick={() => setShowReportsModal(true)}>
                             <i className="ti ti-alert-triangle me-1"></i>View Stoppages
