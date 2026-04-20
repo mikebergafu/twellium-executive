@@ -817,15 +817,34 @@ const Overview = () => {
                 <div className="row g-2 align-items-stretch">
                     <div className="col-auto">
                         <div className="h-100 rounded-3 p-3 d-flex align-items-center justify-content-between" style={{ background: 'rgba(255,255,255,0.12)' }}>
-                            <div>
-                                <div style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.7)', fontWeight: 600 }}>Overall Equipment Effectiveness</div>
-                                <div style={{ fontSize: '2.4rem', fontWeight: 800, color: '#fff', lineHeight: 1.1 }}>{oee.oee.toFixed(1)}%</div>
-                                <div style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.7)' }}>Yesterday</div>
-                            </div>
-                            <div className="text-end">
-                                <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.78)' }}>Running Lines</div>
-                                <div style={{ fontSize: '1.3rem', fontWeight: 700, color: '#fff' }}>{runningLinesCount}/{hourlyOeeByLine.length}</div>
-                            </div>
+                            {(() => {
+                                const active = oeeByLine.filter(l => l.reports > 0);
+                                const sorted = active.length ? [...active].sort((a, b) => a.oee - b.oee) : [];
+                                const low = sorted[0], high = sorted[sorted.length - 1];
+                                return <>
+                                <div>
+                                    <div style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.7)', fontWeight: 600 }}>Overall Equipment Effectiveness <span style={{ color: 'rgba(255,255,255,0.5)' }}>— Yesterday</span></div>
+                                    {high ? (
+                                        <>
+                                            <div style={{ fontSize: '2rem', fontWeight: 800, color: '#4ade80', lineHeight: 1.1 }}>▲ {high.oee.toFixed(1)}%</div>
+                                            <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.7)' }}>Highest — {high.name}</div>
+                                        </>
+                                    ) : (
+                                        <div style={{ fontSize: '2rem', fontWeight: 800, color: '#fff', lineHeight: 1.1 }}>0.0%</div>
+                                    )}
+                                </div>
+                                <div className="text-end">
+                                    {low ? (
+                                        <>
+                                            <div style={{ fontSize: '2rem', fontWeight: 800, color: '#f87171', lineHeight: 1.1 }}>▼ {low.oee.toFixed(1)}%</div>
+                                            <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.7)' }}>Lowest — {low.name}</div>
+                                        </>
+                                    ) : null}
+                                    <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.78)', marginTop: 4 }}>Running Lines</div>
+                                    <div style={{ fontSize: '1.3rem', fontWeight: 700, color: '#fff' }}>{runningLinesCount}/{hourlyOeeByLine.length}</div>
+                                </div>
+                                </>;
+                            })()}
                         </div>
                     </div>
                     {[
