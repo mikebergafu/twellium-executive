@@ -416,7 +416,8 @@ const Overview = () => {
     /* Re-fetch whenever filters change */
     useEffect(() => {
         loadData();
-        return () => { if (abortRef.current) abortRef.current.abort(); };
+        const interval = setInterval(loadData, 30 * 60 * 1000);
+        return () => { clearInterval(interval); if (abortRef.current) abortRef.current.abort(); };
     }, [loadData]);
     
     /* Load shift data when shifts or selectedShiftId changes */
@@ -735,14 +736,16 @@ const Overview = () => {
             const stoppages = rawStoppages.filter(s => s.pet_name === l.name && (s.report_code || '').toUpperCase().includes(currentShiftInfo?.name?.toUpperCase())).length;
             const actualTime = stoppages * 60;
             const totalDT = oee?.totalDowntime > 0 ? oee.totalDowntime : l.downtime;
-            const perf = actualTime > 0 ? ((actualTime - totalDT) / actualTime) * 100 : 0;
+            const plannedDT = oee?.plannedDowntime > 0 ? oee.plannedDowntime : l.plannedDowntime;
+            const operationalTime = actualTime - plannedDT;
+            const perf = operationalTime > 0 ? ((actualTime - totalDT) / operationalTime) * 100 : 0;
             const plannedTime = oee?.plannedTime > 0 ? oee.plannedTime : (l.plannedTimeMins > 0 ? l.plannedTimeMins : shiftMins * l.reports);
             return {
             name: l.name,
             reports: l.reports,
             oee: l.reports > 0 ? clamp(l.oee / l.reports) : 0,
             performance: clamp(perf),
-            perfRaw: { plannedTime, totalDowntime: totalDT, mechDowntime: oee?.mechDowntime || 0 },
+            perfRaw: { plannedTime, totalDowntime: totalDT, plannedDowntime: plannedDT, mechDowntime: oee?.mechDowntime || 0 },
             production: l.production,
             downtime: l.downtime,
             stoppageCount: rawStoppages.filter(s => s.pet_name === l.name && (s.report_code || '').toUpperCase().includes(currentShiftInfo?.name?.toUpperCase())).length,
@@ -1040,13 +1043,14 @@ const Overview = () => {
                         <div className="rounded-3 p-2 mb-3" style={{ background: '#f8fafc', fontSize: '0.75rem', color: '#64748b' }}>
                             <div className="fw-bold mb-1" style={{ color: '#334155' }}>Performance Formula</div>
                             <div className="font-monospace" style={{ fontSize: '0.7rem' }}>
-                                (Hours × 60 − Total Downtime) / (Hours × 60) × 100
+                                ((Hours × 60) − Total Downtime) / ((Hours × 60) − Planned Downtime) × 100
                             </div>
                             <div className="font-monospace mt-1" style={{ fontSize: '0.7rem', color: '#1565c0' }}>
                                 ({(() => {
                                     const time = selectedLine.stoppageCount * 60;
                                     const td = Math.round(selectedLine.perfRaw?.totalDowntime || 0);
-                                    return `${selectedLine.stoppageCount} × 60 − ${td}) / (${time}) × 100 = ${selectedLine.performance.toFixed(1)}%`;
+                                    const pd = Math.round(selectedLine.perfRaw?.plannedDowntime || 0);
+                                    return `(${time} − ${td}) / (${time} − ${pd}) × 100 = ${selectedLine.performance.toFixed(1)}%`;
                                 })()}
                             </div>
                         </div>
