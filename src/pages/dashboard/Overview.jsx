@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import { PieChart, Pie, Cell, Tooltip } from 'recharts';
 import { productionApi } from '../../api/production';
 import { useApiWithFilters } from '../../utils/useApiWithFilters';
 import { SkeletonGauges } from '../../components/ui/Skeletons';
@@ -117,9 +118,9 @@ const Overview = () => {
     const [shiftFilterDate, setShiftFilterDate] = useState(() => new Date().toISOString().split('T')[0]);
     const [shiftComparisonData, setShiftComparisonData] = useState({});
     const [showShiftComparison, setShowShiftComparison] = useState(false);
-    const [sliderMode, setSliderMode] = useState(false);
+    const [sliderMode, setSliderMode] = useState(() => localStorage.getItem('sliderMode') === 'true');
     const [sliderIndex, setSliderIndex] = useState(0);
-    const [sliderSeconds, setSliderSeconds] = useState(10);
+    const [sliderSeconds, setSliderSeconds] = useState(() => Number(localStorage.getItem('sliderSeconds')) || 10);
     const sliderTimerRef = useRef(null);
 
     const loadData = useCallback(async () => {
@@ -600,12 +601,16 @@ const Overview = () => {
         stoppages.forEach(stoppage => {
             (stoppage.incidents || []).forEach(incident => {
                 const category = incident.downtime_category_name || 'Uncategorized';
+                const sub = incident.sub_downtime_category_name || null;
                 const duration = parseFloat(incident.incident_duration || 0);
                 
                 if (!incidentMap[category]) {
-                    incidentMap[category] = 0;
+                    incidentMap[category] = { total: 0, subs: {} };
                 }
-                incidentMap[category] += duration;
+                incidentMap[category].total += duration;
+                if (sub) {
+                    incidentMap[category].subs[sub] = (incidentMap[category].subs[sub] || 0) + duration;
+                }
             });
         });
 
@@ -619,10 +624,13 @@ const Overview = () => {
         };
 
         const downtimeCategories = Object.entries(incidentMap)
-            .map(([name, value]) => ({
+            .map(([name, val]) => ({
                 name,
-                value: Math.round(value),
-                color: categoryColors[name] || categoryColors['Other']
+                value: Math.round(val.total),
+                color: categoryColors[name] || categoryColors['Other'],
+                subs: Object.entries(val.subs)
+                    .map(([sname, sv]) => ({ name: sname, value: Math.round(sv) }))
+                    .sort((a, b) => b.value - a.value)
             }))
             .filter(d => d.value > 0)
             .sort((a, b) => b.value - a.value);
@@ -962,7 +970,7 @@ const Overview = () => {
                     <div className="d-flex align-items-center gap-1">
                         <span style={{ fontSize: '0.75rem', color: '#64748b' }}>Interval:</span>
                         {[10, 20, 30].map(s => (
-                            <button key={s} onClick={() => setSliderSeconds(s)}
+                            <button key={s} onClick={() => { setSliderSeconds(s); localStorage.setItem('sliderSeconds', s); }}
                                 className={`btn btn-xs px-2 py-0 ${sliderSeconds === s ? 'btn-primary' : 'btn-outline-secondary'}`}
                                 style={{ fontSize: '0.72rem', borderRadius: 4 }}>{s}s</button>
                         ))}
@@ -977,7 +985,7 @@ const Overview = () => {
                     <i className="ti ti-slideshow" style={{ color: '#64748b', fontSize: '0.9rem' }}></i>
                     <span style={{ fontSize: '0.78rem', color: '#475569', fontWeight: 600 }}>Slider</span>
                     <div className="form-check form-switch mb-0 ms-1">
-                        <input className="form-check-input" type="checkbox" checked={sliderMode} onChange={e => { setSliderMode(e.target.checked); setSliderIndex(0); }} style={{ cursor: 'pointer' }} />
+                        <input className="form-check-input" type="checkbox" checked={sliderMode} onChange={e => { setSliderMode(e.target.checked); setSliderIndex(0); localStorage.setItem('sliderMode', e.target.checked); }} style={{ cursor: 'pointer' }} />
                     </div>
                 </div>
             </div>
@@ -1010,12 +1018,12 @@ const Overview = () => {
                                 <div className="card mb-2">
                                     <div className="card-header py-2 d-flex align-items-center gap-2"><i className="ti ti-table text-warning"></i><h6 className="mb-0 fw-bold">Stoppages per PET Line</h6><span className="badge bg-soft-warning text-warning ms-1">{activeDateLabel}</span></div>
                                     <div className="card-body p-2">
-                                        <div className="row g-2">
+                                        <div className="d-flex gap-2">
                                             {pets.map(p => {
                                                 const dtPct = p.total*60>0 ? (p.downtime/(p.total*60))*100 : 0;
                                                 const color = dtPct>20?'#dc2626':dtPct>10?'#d97706':'#16a34a';
                                                 return (
-                                                    <div key={p.name} className="col-6 col-md-4 col-xl-2">
+                                                    <div key={p.name} style={{flex:1}}>
                                                         <div className="rounded-3 p-2 h-100" style={{background:'#f8fafc',border:`1px solid ${color}40`,borderLeft:`4px solid ${color}`}}>
                                                             <div className="fw-bold mb-2" style={{fontSize:'0.8rem',color:'#1e293b'}}>{p.name}</div>
                                                             {[
@@ -1051,33 +1059,34 @@ const Overview = () => {
                             });
                             const pets = Object.values(petMap).sort((a,b) => parseInt(a.name?.match(/(\d+)/)?.[0]||'999') - parseInt(b.name?.match(/(\d+)/)?.[0]||'999'));
                             if (!pets.length) return <div className="text-center text-muted py-4">No data</div>;
-                            const stats = (p) => [
-                                {label:'Bottles',value:p.bottles.toLocaleString(),icon:'ti-bottle',color:'#1d4ed8'},
-                                {label:'CO₂',value:`${(p.bottles*CO2).toFixed(1)} kg`,icon:'ti-cloud',color:'#0ea5e9'},
-                                {label:'Syrup',value:`${(p.bottles*SYRUP/1000).toFixed(1)} L`,icon:'ti-droplet',color:'#8b5cf6'},
-                                {label:'Material',value:`${(p.bottles*MAT/1000).toFixed(1)} kg`,icon:'ti-package',color:'#f59e0b'},
-                                {label:'Electricity',value:`${(p.runMins*ELEC).toFixed(0)} kWh`,icon:'ti-bolt',color:'#eab308'},
-                                {label:'Water',value:`${(p.bottles*WATER).toFixed(0)} L`,icon:'ti-droplets',color:'#06b6d4'},
+                            const PIE_COLORS = ['#1d4ed8','#0ea5e9','#8b5cf6','#f59e0b','#16a34a','#dc2626','#06b6d4','#ec4899'];
+                            const metrics = [
+                                {label:'CO₂',unit:'kg',data:pets.map((p,i)=>({name:p.name,value:parseFloat((p.bottles*CO2).toFixed(1)),fill:PIE_COLORS[i%PIE_COLORS.length]}))},
+                                {label:'Syrup',unit:'L',data:pets.map((p,i)=>({name:p.name,value:parseFloat((p.bottles*SYRUP/1000).toFixed(1)),fill:PIE_COLORS[i%PIE_COLORS.length]}))},
+                                {label:'Material',unit:'kg',data:pets.map((p,i)=>({name:p.name,value:parseFloat((p.bottles*MAT/1000).toFixed(1)),fill:PIE_COLORS[i%PIE_COLORS.length]}))},
+                                {label:'Electricity',unit:'kWh',data:pets.map((p,i)=>({name:p.name,value:parseFloat((p.runMins*ELEC).toFixed(0)),fill:PIE_COLORS[i%PIE_COLORS.length]}))},
+                                {label:'Water',unit:'L',data:pets.map((p,i)=>({name:p.name,value:parseFloat((p.bottles*WATER).toFixed(0)),fill:PIE_COLORS[i%PIE_COLORS.length]}))},
                             ];
                             return (
                                 <div className="card mb-2">
                                     <div className="card-header py-2 d-flex align-items-center gap-2"><i className="ti ti-leaf text-success"></i><h6 className="mb-0 fw-bold">Resources &amp; Yield Estimates</h6><span className="badge bg-soft-success text-success ms-1">{activeDateLabel}</span><span className="badge bg-soft-secondary text-secondary ms-1"><i className="ti ti-info-circle me-1"></i>Estimates</span></div>
                                     <div className="card-body p-2">
-                                        <div className="row g-2">
-                                            {pets.map(p => (
-                                                <div key={p.name} className="col-6 col-md-4 col-xl-2">
-                                                    <div className="rounded-3 p-2 h-100" style={{background:'#f8fafc',border:'1px solid #e2e8f0'}}>
-                                                        <div className="fw-bold mb-2" style={{fontSize:'0.8rem',color:'#1e293b'}}>{p.name}</div>
-                                                        {stats(p).map(s => (
-                                                            <div key={s.label} className="d-flex align-items-center gap-1 mb-1">
-                                                                <i className={`ti ${s.icon}`} style={{color:s.color,fontSize:'0.85rem',width:16}}></i>
-                                                                <span style={{fontSize:'0.7rem',color:'#64748b',flex:1}}>{s.label}</span>
-                                                                <span style={{fontSize:'0.75rem',fontWeight:700,color:'#0f172a'}}>{s.value}</span>
-                                                            </div>
-                                                        ))}
-                                                    </div>
+                                        <div className="d-flex flex-nowrap justify-content-around gap-3" style={{overflowX:'auto'}}>
+                                            {metrics.map(m => (
+                                                <div key={m.label} className="text-center" style={{flexShrink:0}}>
+                                                    <div style={{fontSize:'0.72rem',fontWeight:700,color:'#475569',marginBottom:2}}>{m.label} ({m.unit})</div>
+                                                    <PieChart width={160} height={160}>
+                                                        <Pie data={m.data} cx={75} cy={75} innerRadius={42} outerRadius={68} dataKey="value" paddingAngle={2}>
+                                                            {m.data.map((d,i) => <Cell key={i} fill={d.fill} />)}
+                                                        </Pie>
+                                                        <Tooltip formatter={(v,n) => [`${v} ${m.unit}`, n]} contentStyle={{fontSize:'0.7rem',padding:'2px 6px'}} />
+                                                    </PieChart>
+                                                    <div style={{fontSize:'0.7rem',fontWeight:700,color:'#1e293b'}}>{m.data.reduce((s,d)=>s+d.value,0).toLocaleString()} {m.unit}</div>
                                                 </div>
                                             ))}
+                                        </div>
+                                        <div className="d-flex flex-wrap gap-2 justify-content-center mt-2">
+                                            {pets.map((p,i) => <span key={p.name} className="d-flex align-items-center gap-1" style={{fontSize:'0.68rem'}}><span style={{width:8,height:8,borderRadius:'50%',background:PIE_COLORS[i%PIE_COLORS.length],display:'inline-block'}}></span>{p.name}</span>)}
                                         </div>
                                     </div>
                                 </div>
@@ -1088,8 +1097,40 @@ const Overview = () => {
                             const total = downtimeCategories.reduce((s,c)=>s+c.value,0);
                             return (
                                 <div className="card mb-2">
-                                    <div className="card-header py-2 d-flex align-items-center gap-2"><i className="ti ti-chart-bar text-danger"></i><h6 className="mb-0 fw-bold">Stoppage Categories</h6><span className="badge bg-soft-danger text-danger ms-1">{activeDateLabel}</span></div>
-                                    <div className="card-body py-3"><div className="d-flex flex-column gap-2">{downtimeCategories.map(cat=><div key={cat.name} className="d-flex align-items-center gap-2"><div style={{width:140,fontSize:'0.78rem',fontWeight:600,color:'#475569',textAlign:'right',flexShrink:0,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}} title={cat.name}>{cat.name}</div><div style={{flex:1,height:22,background:'#f1f5f9',borderRadius:4,overflow:'hidden'}}><div style={{width:`${(cat.value/max)*100}%`,height:'100%',background:cat.color,borderRadius:4,display:'flex',alignItems:'center',paddingLeft:8,minWidth:40}}><span style={{fontSize:'0.72rem',fontWeight:700,color:'#fff',whiteSpace:'nowrap'}}>{cat.value} min</span></div></div><div style={{width:48,fontSize:'0.78rem',fontWeight:700,color:cat.color,textAlign:'right',flexShrink:0}}>{((cat.value/total)*100).toFixed(1)}%</div></div>)}</div></div>
+                                    <div className="card-header py-2 d-flex align-items-center gap-2"><i className="ti ti-chart-bar text-danger"></i><h6 className="mb-0 fw-bold">Stoppage Categories</h6><span className="badge bg-soft-danger text-danger ms-1">{activeDateLabel}</span><span className="badge bg-danger ms-auto">{total} min total</span></div>
+                                    <div className="card-body py-3">
+                                        <div className="d-flex flex-column gap-3">
+                                            {downtimeCategories.map(cat => {
+                                                const pct = ((cat.value/total)*100).toFixed(1);
+                                                return (
+                                                    <div key={cat.name}>
+                                                        <div className="d-flex justify-content-between mb-1">
+                                                            <span style={{fontSize:'0.8rem',fontWeight:600,color:'#334155'}} title={cat.name}>{cat.name}</span>
+                                                            <span style={{fontSize:'0.8rem',fontWeight:700,color:cat.color}}>{cat.value} min <span style={{color:'#94a3b8',fontWeight:500}}>({pct}%)</span></span>
+                                                        </div>
+                                                        <div style={{height:18,background:'#f1f5f9',borderRadius:6,overflow:'hidden'}}>
+                                                            <div style={{width:`${(cat.value/max)*100}%`,height:'100%',background:cat.color,borderRadius:6,transition:'width 0.6s ease'}} />
+                                                        </div>
+                                                        {cat.subs?.length > 0 && (
+                                                            <div className="d-flex flex-column gap-1 mt-1 ps-3">
+                                                                {cat.subs.map(sub => (
+                                                                    <div key={sub.name}>
+                                                                        <div className="d-flex justify-content-between mb-1">
+                                                                            <span style={{fontSize:'0.72rem',color:'#64748b'}}>{sub.name}</span>
+                                                                            <span style={{fontSize:'0.72rem',fontWeight:600,color:'#64748b'}}>{sub.value} min</span>
+                                                                        </div>
+                                                                        <div style={{height:8,background:'#f1f5f9',borderRadius:4,overflow:'hidden'}}>
+                                                                            <div style={{width:`${(sub.value/cat.value)*100}%`,height:'100%',background:cat.color,opacity:0.5,borderRadius:4}} />
+                                                                        </div>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
                                 </div>
                             );
                         })()}
@@ -1171,12 +1212,12 @@ const Overview = () => {
                             <span className="badge bg-soft-warning text-warning ms-1">{activeDateLabel}</span>
                         </div>
                         <div className="card-body p-2">
-                            <div className="row g-2">
+                            <div className="d-flex gap-2">
                                 {pets.map(p => {
                                     const dtPct = p.total*60>0 ? (p.downtime/(p.total*60))*100 : 0;
                                     const color = dtPct>20?'#dc2626':dtPct>10?'#d97706':'#16a34a';
                                     return (
-                                        <div key={p.name} className="col-6 col-md-4 col-xl-2">
+                                        <div key={p.name} style={{flex:1}}>
                                             <div className="rounded-3 p-2 h-100" style={{ background: '#f8fafc', border: `1px solid ${color}40`, borderLeft: `4px solid ${color}` }}>
                                                 <div className="fw-bold mb-2" style={{ fontSize: '0.8rem', color: '#1e293b' }}>{p.name}</div>
                                                 {[
@@ -1214,13 +1255,13 @@ const Overview = () => {
                 });
                 const pets = Object.values(petMap).sort((a,b) => parseInt(a.name?.match(/(\d+)/)?.[0]||'999') - parseInt(b.name?.match(/(\d+)/)?.[0]||'999'));
                 if (!pets.length) return null;
-                const stats = (p) => [
-                    {label:'Bottles',value:p.bottles.toLocaleString(),icon:'ti-bottle',color:'#1d4ed8'},
-                    {label:'CO₂',value:`${(p.bottles*CO2).toFixed(1)} kg`,icon:'ti-cloud',color:'#0ea5e9'},
-                    {label:'Syrup',value:`${(p.bottles*SYRUP/1000).toFixed(1)} L`,icon:'ti-droplet',color:'#8b5cf6'},
-                    {label:'Material',value:`${(p.bottles*MAT/1000).toFixed(1)} kg`,icon:'ti-package',color:'#f59e0b'},
-                    {label:'Electricity',value:`${(p.runMins*ELEC).toFixed(0)} kWh`,icon:'ti-bolt',color:'#eab308'},
-                    {label:'Water',value:`${(p.bottles*WATER).toFixed(0)} L`,icon:'ti-droplets',color:'#06b6d4'},
+                const PIE_COLORS = ['#1d4ed8','#0ea5e9','#8b5cf6','#f59e0b','#16a34a','#dc2626','#06b6d4','#ec4899'];
+                const metrics = [
+                    {label:'CO₂',unit:'kg',data:pets.map((p,i)=>({name:p.name,value:parseFloat((p.bottles*CO2).toFixed(1)),fill:PIE_COLORS[i%PIE_COLORS.length]}))},
+                    {label:'Syrup',unit:'L',data:pets.map((p,i)=>({name:p.name,value:parseFloat((p.bottles*SYRUP/1000).toFixed(1)),fill:PIE_COLORS[i%PIE_COLORS.length]}))},
+                    {label:'Material',unit:'kg',data:pets.map((p,i)=>({name:p.name,value:parseFloat((p.bottles*MAT/1000).toFixed(1)),fill:PIE_COLORS[i%PIE_COLORS.length]}))},
+                    {label:'Electricity',unit:'kWh',data:pets.map((p,i)=>({name:p.name,value:parseFloat((p.runMins*ELEC).toFixed(0)),fill:PIE_COLORS[i%PIE_COLORS.length]}))},
+                    {label:'Water',unit:'L',data:pets.map((p,i)=>({name:p.name,value:parseFloat((p.bottles*WATER).toFixed(0)),fill:PIE_COLORS[i%PIE_COLORS.length]}))},
                 ];
                 return (
                     <div className="card mb-2">
@@ -1231,20 +1272,26 @@ const Overview = () => {
                             <span className="badge bg-soft-secondary text-secondary ms-1"><i className="ti ti-info-circle me-1"></i>Estimates</span>
                         </div>
                         <div className="card-body p-2">
-                            <div className="row g-2">
-                                {pets.map(p => (
-                                    <div key={p.name} className="col-6 col-md-4 col-xl-2">
-                                        <div className="rounded-3 p-2 h-100" style={{ background: '#f8fafc', border: '1px solid #e2e8f0' }}>
-                                            <div className="fw-bold mb-2" style={{ fontSize: '0.8rem', color: '#1e293b' }}>{p.name}</div>
-                                            {stats(p).map(s => (
-                                                <div key={s.label} className="d-flex align-items-center gap-1 mb-1">
-                                                    <i className={`ti ${s.icon}`} style={{ color: s.color, fontSize: '0.85rem', width: 16 }}></i>
-                                                    <span style={{ fontSize: '0.7rem', color: '#64748b', flex: 1 }}>{s.label}</span>
-                                                    <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#0f172a' }}>{s.value}</span>
-                                                </div>
-                                            ))}
-                                        </div>
+                            <div className="d-flex flex-nowrap justify-content-around gap-3" style={{overflowX:'auto'}}>
+                                {metrics.map(m => (
+                                    <div key={m.label} className="text-center" style={{flexShrink:0}}>
+                                        <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#475569', marginBottom: 2 }}>{m.label} ({m.unit})</div>
+                                        <PieChart width={160} height={160}>
+                                            <Pie data={m.data} cx={75} cy={75} innerRadius={42} outerRadius={68} dataKey="value" paddingAngle={2}>
+                                                {m.data.map((d, i) => <Cell key={i} fill={d.fill} />)}
+                                            </Pie>
+                                            <Tooltip formatter={(v, n) => [`${v} ${m.unit}`, n]} contentStyle={{ fontSize: '0.7rem', padding: '2px 6px' }} />
+                                        </PieChart>
+                                        <div style={{ fontSize: '0.7rem', fontWeight: 700, color: '#1e293b' }}>{m.data.reduce((s,d)=>s+d.value,0).toLocaleString()} {m.unit}</div>
                                     </div>
+                                ))}
+                            </div>
+                            <div className="d-flex flex-wrap gap-2 justify-content-center mt-2">
+                                {pets.map((p, i) => (
+                                    <span key={p.name} className="d-flex align-items-center gap-1" style={{ fontSize: '0.68rem' }}>
+                                        <span style={{ width: 8, height: 8, borderRadius: '50%', background: PIE_COLORS[i % PIE_COLORS.length], display: 'inline-block' }}></span>
+                                        {p.name}
+                                    </span>
                                 ))}
                             </div>
                         </div>
@@ -1255,40 +1302,46 @@ const Overview = () => {
             {/* ── Stoppage Category Horizontal Bar Chart ── */}
             {downtimeCategories.length > 0 && (() => {
                 const max = downtimeCategories[0]?.value || 1;
+                const total = downtimeCategories.reduce((s,c)=>s+c.value,0);
                 return (
                     <div className="card mb-2">
                         <div className="card-header py-2 d-flex align-items-center gap-2">
                             <i className="ti ti-chart-bar text-danger"></i>
                             <h6 className="mb-0 fw-bold">Stoppage Categories</h6>
                             <span className="badge bg-soft-danger text-danger ms-1">{activeDateLabel}</span>
+                            <span className="badge bg-danger ms-auto">{total} min total</span>
                         </div>
                         <div className="card-body py-3">
-                            <div className="d-flex flex-column gap-2">
-                                {downtimeCategories.map(cat => (
-                                    <div key={cat.name} className="d-flex align-items-center gap-2">
-                                        <div style={{ width: 140, fontSize: '0.78rem', fontWeight: 600, color: '#475569', textAlign: 'right', flexShrink: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={cat.name}>
-                                            {cat.name}
-                                        </div>
-                                        <div style={{ flex: 1, height: 22, background: '#f1f5f9', borderRadius: 4, overflow: 'hidden' }}>
-                                            <div style={{
-                                                width: `${(cat.value / max) * 100}%`,
-                                                height: '100%',
-                                                background: cat.color,
-                                                borderRadius: 4,
-                                                transition: 'width 0.6s ease',
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                paddingLeft: 8,
-                                                minWidth: 40,
-                                            }}>
-                                                <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#fff', whiteSpace: 'nowrap' }}>{cat.value} min</span>
+                            <div className="d-flex flex-column gap-3">
+                                {downtimeCategories.map(cat => {
+                                    const pct = ((cat.value/total)*100).toFixed(1);
+                                    return (
+                                        <div key={cat.name}>
+                                            <div className="d-flex justify-content-between mb-1">
+                                                <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#334155' }} title={cat.name}>{cat.name}</span>
+                                                <span style={{ fontSize: '0.8rem', fontWeight: 700, color: cat.color }}>{cat.value} min <span style={{ color: '#94a3b8', fontWeight: 500 }}>({pct}%)</span></span>
                                             </div>
+                                            <div style={{ height: 18, background: '#f1f5f9', borderRadius: 6, overflow: 'hidden' }}>
+                                                <div style={{ width: `${(cat.value/max)*100}%`, height: '100%', background: cat.color, borderRadius: 6, transition: 'width 0.6s ease' }} />
+                                            </div>
+                                            {cat.subs?.length > 0 && (
+                                                <div className="d-flex flex-column gap-1 mt-1 ps-3">
+                                                    {cat.subs.map(sub => (
+                                                        <div key={sub.name}>
+                                                            <div className="d-flex justify-content-between mb-1">
+                                                                <span style={{ fontSize: '0.72rem', color: '#64748b' }}>{sub.name}</span>
+                                                                <span style={{ fontSize: '0.72rem', fontWeight: 600, color: '#64748b' }}>{sub.value} min</span>
+                                                            </div>
+                                                            <div style={{ height: 8, background: '#f1f5f9', borderRadius: 4, overflow: 'hidden' }}>
+                                                                <div style={{ width: `${(sub.value/cat.value)*100}%`, height: '100%', background: cat.color, opacity: 0.5, borderRadius: 4 }} />
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
                                         </div>
-                                        <div style={{ width: 48, fontSize: '0.78rem', fontWeight: 700, color: cat.color, textAlign: 'right', flexShrink: 0 }}>
-                                            {((cat.value / downtimeCategories.reduce((s, c) => s + c.value, 0)) * 100).toFixed(1)}%
-                                        </div>
-                                    </div>
-                                ))}
+                                    );
+                                })}
                             </div>
                         </div>
                     </div>
