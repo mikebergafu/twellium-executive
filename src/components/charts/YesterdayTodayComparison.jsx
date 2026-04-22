@@ -48,7 +48,7 @@ const YesterdayTodayComparison = () => {
         return { yesterday: agg(yesterdayData), today: agg(todayData) };
     }, [yesterdayData, todayData]);
 
-    const Metric = ({ label, icon, todayVal, yesterdayVal, unit = '%', invertColor }) => {
+    const Metric = ({ label, icon, todayVal, yesterdayVal, unit = '%', invertColor, hideComparison }) => {
         const diff = todayVal - yesterdayVal;
         const isUp = diff > 0;
         const good = invertColor ? !isUp : isUp;
@@ -66,13 +66,15 @@ const YesterdayTodayComparison = () => {
                         <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#475569' }}>{label}</span>
                     </div>
                     <div style={{ fontSize: '1.8rem', fontWeight: 800, color: '#0f172a', lineHeight: 1 }}>{fmt(todayVal)}</div>
-                    <div className="d-flex align-items-center mt-2 gap-2">
-                        <span className="d-inline-flex align-items-center gap-1 rounded-pill px-2 py-1" style={{ background: '#fff', fontSize: '0.8rem', fontWeight: 700, color }}>
-                            <i className={`ti ${isUp ? 'ti-arrow-up' : diff < 0 ? 'ti-arrow-down' : 'ti-minus'}`}></i>
-                            {deltaLabel}
-                        </span>
-                        <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>vs yesterday ({fmt(yesterdayVal)})</span>
-                    </div>
+                    {!hideComparison && (
+                        <div className="d-flex align-items-center mt-2 gap-2">
+                            <span className="d-inline-flex align-items-center gap-1 rounded-pill px-2 py-1" style={{ background: '#fff', fontSize: '0.8rem', fontWeight: 700, color }}>
+                                <i className={`ti ${isUp ? 'ti-arrow-up' : diff < 0 ? 'ti-arrow-down' : 'ti-minus'}`}></i>
+                                {deltaLabel}
+                            </span>
+                            <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>vs yesterday ({fmt(yesterdayVal)})</span>
+                        </div>
+                    )}
                 </div>
             </div>
         );
@@ -96,8 +98,8 @@ const YesterdayTodayComparison = () => {
             <div className="card-body py-3">
                 <div className="row g-3 row-cols-2 row-cols-lg-4 mb-3">
                     <Metric label="Efficiency" icon="ti-gauge" todayVal={data.today.efficiency} yesterdayVal={data.yesterday.efficiency} />
-                    <Metric label="Output (Bottles)" icon="ti-bottle" todayVal={data.today.production} yesterdayVal={data.yesterday.production} unit="n" />
-                    <Metric label="Downtime" icon="ti-clock-pause" todayVal={data.today.downtime} yesterdayVal={data.yesterday.downtime} unit="n" invertColor />
+                    <Metric label="Output (Bottles)" icon="ti-bottle" todayVal={data.today.production} yesterdayVal={data.yesterday.production} unit="n" hideComparison />
+                    <Metric label="Downtime" icon="ti-clock-pause" todayVal={data.today.downtime} yesterdayVal={data.yesterday.downtime} unit="n" invertColor hideComparison />
                     <Metric label="Active Lines" icon="ti-topology-star-3" todayVal={data.today.lines} yesterdayVal={data.yesterday.lines} unit="n" />
                 </div>
                 <div className="row g-3 row-cols-3">
