@@ -804,6 +804,18 @@ const Overview = () => {
                             <i className="ti ti-clock me-1"></i>{currentShiftInfo.lastUpdated}
                         </span>
                     )}
+                    <div className="d-flex align-items-center gap-1 px-2 py-1 rounded-3 shadow-sm" style={{ background: '#fff', border: '1px solid #e2e8f0' }}>
+                        <i className="ti ti-calendar" style={{ color: '#64748b', fontSize: '0.9rem' }}></i>
+                        <input
+                            type="date"
+                            className="form-control form-control-sm border-0 p-0"
+                            value={oeeDate}
+                            onChange={(e) => { setOeeDate(e.target.value); setShiftFilterDate(e.target.value); }}
+                            max={new Date().toISOString().split('T')[0]}
+                            style={{ width: 130, fontSize: '0.8rem', background: 'transparent', boxShadow: 'none' }}
+                            title="Select dashboard date"
+                        />
+                    </div>
                     <button className="btn btn-sm btn-light border-0 shadow-sm" onClick={loadData} disabled={refreshing} title="Refresh data" style={{ borderRadius: '50%', width: 36, height: 36, padding: 0 }}>
                         <i className={`ti ti-refresh${refreshing ? ' spin' : ''}`}></i>
                     </button>
@@ -933,6 +945,214 @@ const Overview = () => {
 
             {/* ── Yesterday vs Today Comparison ──── */}
             <YesterdayTodayComparison />
+
+            {/* ── Per-PET Stoppages Summary Table ── */}
+            {(() => {
+                // Build per-PET aggregation from rawStoppages
+                const petMap = {};
+                rawStoppages.forEach(s => {
+                    const name = s.pet_name;
+                    if (!name) return;
+                    if (!petMap[name]) petMap[name] = { name, total: 0, downtime: 0, runTime: 0, stoppageCount: 0 };
+                    petMap[name].total += 1;
+                    petMap[name].downtime += s.downtime_minutes || 0;
+                    petMap[name].runTime += 60 - (s.downtime_minutes || 0);
+                    petMap[name].stoppageCount += (s.incidents?.length || 0);
+                });
+                const pets = Object.values(petMap).sort((a, b) => {
+                    const aNum = parseInt(a.name?.match(/(\d+)/)?.[0] || '999');
+                    const bNum = parseInt(b.name?.match(/(\d+)/)?.[0] || '999');
+                    return aNum - bNum;
+                });
+                if (!pets.length) return null;
+                return (
+                    <div className="card mb-2">
+                        <div className="card-header py-2 d-flex align-items-center gap-2">
+                            <i className="ti ti-table text-warning"></i>
+                            <h6 className="mb-0 fw-bold">Stoppages per PET Line</h6>
+                            <span className="badge bg-soft-warning text-warning ms-1">{activeDateLabel}</span>
+                        </div>
+                        <div className="card-body p-0">
+                            <div className="table-responsive">
+                                <table className="table table-sm table-hover mb-0" style={{ fontSize: '0.8rem' }}>
+                                    <thead style={{ background: '#f8fafc' }}>
+                                        <tr style={{ color: '#64748b' }}>
+                                            <th className="ps-3">PET Line</th>
+                                            <th className="text-center">Hours Submitted</th>
+                                            <th className="text-center">Run Time (min)</th>
+                                            <th className="text-center">Downtime (min)</th>
+                                            <th className="text-center">Incidents</th>
+                                            <th className="text-center">Downtime %</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {pets.map(p => {
+                                            const totalTime = p.total * 60;
+                                            const dtPct = totalTime > 0 ? (p.downtime / totalTime) * 100 : 0;
+                                            const color = dtPct > 20 ? '#dc2626' : dtPct > 10 ? '#d97706' : '#16a34a';
+                                            return (
+                                                <tr key={p.name}>
+                                                    <td className="ps-3 fw-bold">{p.name}</td>
+                                                    <td className="text-center">{p.total}</td>
+                                                    <td className="text-center">{Math.round(p.runTime)}</td>
+                                                    <td className="text-center" style={{ color: '#dc2626', fontWeight: 600 }}>{Math.round(p.downtime)}</td>
+                                                    <td className="text-center">{p.stoppageCount}</td>
+                                                    <td className="text-center">
+                                                        <div className="d-flex align-items-center gap-1 justify-content-center">
+                                                            <div style={{ width: 60, height: 6, background: '#e5e7eb', borderRadius: 3, overflow: 'hidden' }}>
+                                                                <div style={{ width: `${Math.min(dtPct, 100)}%`, height: '100%', background: color, borderRadius: 3 }} />
+                                                            </div>
+                                                            <span style={{ fontSize: '0.75rem', fontWeight: 700, color }}>{dtPct.toFixed(1)}%</span>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                    <tfoot style={{ background: '#f8fafc', fontWeight: 700 }}>
+                                        <tr>
+                                            <td className="ps-3">Total</td>
+                                            <td className="text-center">{pets.reduce((s, p) => s + p.total, 0)}</td>
+                                            <td className="text-center">{Math.round(pets.reduce((s, p) => s + p.runTime, 0))}</td>
+                                            <td className="text-center" style={{ color: '#dc2626' }}>{Math.round(pets.reduce((s, p) => s + p.downtime, 0))}</td>
+                                            <td className="text-center">{pets.reduce((s, p) => s + p.stoppageCount, 0)}</td>
+                                            <td></td>
+                                        </tr>
+                                    </tfoot>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                );
+            })()}
+
+            {/* ── Resources / Yield Stats Table ──── */}
+            {(() => {
+                const totalHours = rawStoppages.length;
+                const totalDT = rawStoppages.reduce((s, r) => s + (r.downtime_minutes || 0), 0);
+                const mechDT = rawStoppages.reduce((s, r) => {
+                    const mech = (r.incidents || []).filter(i => (i.downtime_category_name || '').toLowerCase().includes('mechanical'));
+                    return s + mech.reduce((a, i) => a + parseFloat(i.incident_duration || 0), 0);
+                }, 0);
+                const plannedDT = rawStoppages.reduce((s, r) => {
+                    const planned = (r.incidents || []).filter(i => (i.downtime_category_name || '').toLowerCase().includes('planned'));
+                    return s + planned.reduce((a, i) => a + parseFloat(i.incident_duration || 0), 0);
+                }, 0);
+                const runMins = totalHours * 60 - totalDT;
+                const bottles = rawStoppages.reduce((s, r) => s + (r.bottles_produced || 0), 0);
+
+                // Estimated resource consumption (per-bottle industry averages, shown as estimates)
+                const CO2_PER_BOTTLE = 0.006;   // kg
+                const SYRUP_PER_BOTTLE = 0.25;  // ml (concentrate)
+                const MATERIAL_PER_BOTTLE = 28; // g (PET preform + cap + label)
+                const ELEC_PER_MIN = 2.5;        // kWh per run minute
+                const WATER_PER_BOTTLE = 1.8;   // L
+
+                const rows = [
+                    { label: 'Total DT', mins: Math.round(totalDT), co2: (totalDT * 0).toFixed(1), syrup: '—', material: '—', elec: (totalDT * ELEC_PER_MIN * 0.1).toFixed(1), water: '—', unit: 'min' },
+                    { label: 'Mechanical DT', mins: Math.round(mechDT), co2: '—', syrup: '—', material: '—', elec: (mechDT * ELEC_PER_MIN * 0.1).toFixed(1), water: '—', unit: 'min' },
+                    { label: 'Planned DT', mins: Math.round(plannedDT), co2: '—', syrup: '—', material: '—', elec: (plannedDT * ELEC_PER_MIN * 0.1).toFixed(1), water: '—', unit: 'min' },
+                ];
+
+                return (
+                    <div className="card mb-2">
+                        <div className="card-header py-2 d-flex align-items-center gap-2">
+                            <i className="ti ti-leaf text-success"></i>
+                            <h6 className="mb-0 fw-bold">Resources &amp; Yield Estimates</h6>
+                            <span className="badge bg-soft-success text-success ms-1">{activeDateLabel}</span>
+                            <span className="badge bg-soft-secondary text-secondary ms-1" title="Values are estimates based on industry averages">
+                                <i className="ti ti-info-circle me-1"></i>Estimates
+                            </span>
+                        </div>
+                        <div className="card-body p-0">
+                            {/* Summary stat pills */}
+                            <div className="d-flex flex-wrap gap-2 p-3 pb-2">
+                                {[
+                                    { label: 'CO₂ Yield', value: `${(bottles * CO2_PER_BOTTLE).toFixed(0)} kg`, icon: 'ti-cloud', color: '#0ea5e9' },
+                                    { label: 'Syrup Yield', value: `${(bottles * SYRUP_PER_BOTTLE / 1000).toFixed(0)} L`, icon: 'ti-droplet', color: '#8b5cf6' },
+                                    { label: 'Material', value: `${(bottles * MATERIAL_PER_BOTTLE / 1000).toFixed(0)} kg`, icon: 'ti-package', color: '#f59e0b' },
+                                    { label: 'Electricity', value: `${(runMins * ELEC_PER_MIN).toFixed(0)} kWh`, icon: 'ti-bolt', color: '#eab308' },
+                                    { label: 'Water', value: `${(bottles * WATER_PER_BOTTLE).toFixed(0)} L`, icon: 'ti-droplets', color: '#06b6d4' },
+                                ].map(stat => (
+                                    <div key={stat.label} className="d-flex align-items-center gap-2 px-3 py-2 rounded-3" style={{ background: '#f8fafc', border: '1px solid #e2e8f0', minWidth: 130 }}>
+                                        <i className={`ti ${stat.icon}`} style={{ color: stat.color, fontSize: '1.2rem' }}></i>
+                                        <div>
+                                            <div style={{ fontSize: '0.7rem', color: '#94a3b8', fontWeight: 600 }}>{stat.label}</div>
+                                            <div style={{ fontSize: '1rem', fontWeight: 800, color: '#0f172a' }}>{stat.value}</div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                            {/* DT breakdown table */}
+                            <div className="table-responsive">
+                                <table className="table table-sm mb-0" style={{ fontSize: '0.78rem' }}>
+                                    <thead style={{ background: '#f8fafc' }}>
+                                        <tr style={{ color: '#64748b' }}>
+                                            <th className="ps-3">Downtime Type</th>
+                                            <th className="text-center">Duration (min)</th>
+                                            <th className="text-center">CO₂ Loss (kg)</th>
+                                            <th className="text-center">Electricity Loss (kWh)</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {rows.map(r => (
+                                            <tr key={r.label}>
+                                                <td className="ps-3 fw-semibold">{r.label}</td>
+                                                <td className="text-center" style={{ color: '#dc2626', fontWeight: 600 }}>{r.mins}</td>
+                                                <td className="text-center text-muted">{r.co2}</td>
+                                                <td className="text-center text-muted">{r.elec}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                );
+            })()}
+
+            {/* ── Stoppage Category Horizontal Bar Chart ── */}
+            {downtimeCategories.length > 0 && (() => {
+                const max = downtimeCategories[0]?.value || 1;
+                return (
+                    <div className="card mb-2">
+                        <div className="card-header py-2 d-flex align-items-center gap-2">
+                            <i className="ti ti-chart-bar text-danger"></i>
+                            <h6 className="mb-0 fw-bold">Stoppage Categories</h6>
+                            <span className="badge bg-soft-danger text-danger ms-1">{activeDateLabel}</span>
+                        </div>
+                        <div className="card-body py-3">
+                            <div className="d-flex flex-column gap-2">
+                                {downtimeCategories.map(cat => (
+                                    <div key={cat.name} className="d-flex align-items-center gap-2">
+                                        <div style={{ width: 140, fontSize: '0.78rem', fontWeight: 600, color: '#475569', textAlign: 'right', flexShrink: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={cat.name}>
+                                            {cat.name}
+                                        </div>
+                                        <div style={{ flex: 1, height: 22, background: '#f1f5f9', borderRadius: 4, overflow: 'hidden' }}>
+                                            <div style={{
+                                                width: `${(cat.value / max) * 100}%`,
+                                                height: '100%',
+                                                background: cat.color,
+                                                borderRadius: 4,
+                                                transition: 'width 0.6s ease',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                paddingLeft: 8,
+                                                minWidth: 40,
+                                            }}>
+                                                <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#fff', whiteSpace: 'nowrap' }}>{cat.value} min</span>
+                                            </div>
+                                        </div>
+                                        <div style={{ width: 48, fontSize: '0.78rem', fontWeight: 700, color: cat.color, textAlign: 'right', flexShrink: 0 }}>
+                                            {((cat.value / downtimeCategories.reduce((s, c) => s + c.value, 0)) * 100).toFixed(1)}%
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                );
+            })()}
 
             {/* ── Shift + Production Lines ────────── */}
             <div className="rounded-3 px-2 py-1" style={{ background: '#fff', boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
