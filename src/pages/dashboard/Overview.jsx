@@ -442,7 +442,7 @@ const Overview = () => {
     }, [loadShiftData]);
 
     /* Slider auto-advance */
-    const SLIDER_PANELS = 4; // Yesterday vs Today, Stoppages, Resources, Stoppage Categories + Shift
+    const SLIDER_PANELS = 5;
     useEffect(() => {
         if (!sliderMode) { clearInterval(sliderTimerRef.current); return; }
         sliderTimerRef.current = setInterval(() => setSliderIndex(i => (i + 1) % SLIDER_PANELS), sliderSeconds * 1000);
@@ -1043,6 +1043,53 @@ const Overview = () => {
                         {sliderIndex === 3 && downtimeCategories.length === 0 && (
                             <div className="card mb-2"><div className="card-body text-center text-muted py-4">No stoppage category data</div></div>
                         )}
+                        {sliderIndex === 4 && (
+                            <div className="rounded-3 px-2 py-1" style={{ background: '#fff', boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
+                                <div className="d-flex align-items-center justify-content-between mb-1 flex-wrap gap-1">
+                                    <div className="d-flex align-items-center gap-2 flex-wrap">
+                                        <h6 className="mb-0 fw-bold" style={{ fontSize: '1.05rem' }}>Shift Production Metrics</h6>
+                                        {currentShiftInfo && <span className="badge bg-primary" style={{ fontSize: '0.75rem' }}>{currentShiftInfo.name}</span>}
+                                        {currentShiftInfo?.lastUpdated && <span style={{ fontSize: '0.8rem', color: '#64748b' }}>| Last Updated: {currentShiftInfo.lastUpdated}</span>}
+                                        {currentShiftInfo?.start_time && currentShiftInfo?.end_time && (
+                                            <span style={{ fontSize: '0.8rem', color: '#64748b' }}>| Shift: {shiftDateLabel} {currentShiftInfo.start_time.slice(0,5)} - {currentShiftInfo.end_time.slice(0,5)}</span>
+                                        )}
+                                    </div>
+                                    <div className="d-flex align-items-center gap-2">
+                                        <input type="date" className="form-control form-control-sm border-0 shadow-sm" value={shiftFilterDate} onChange={(e) => setShiftFilterDate(e.target.value)} max={new Date().toISOString().split('T')[0]} style={{ width: '150px', background: '#f8fafc' }} />
+                                        <div className="btn-group btn-group-sm">
+                                            {shifts.sort((a, b) => a.name === 'DAY' ? -1 : b.name === 'DAY' ? 1 : 0).map(shift => (
+                                                <button key={shift.id} className={`btn ${currentShiftInfo?.id === shift.id ? 'btn-primary' : 'btn-outline-secondary'}`} onClick={() => setSelectedShiftId(shift.id)}>{shift.name}</button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+                                {isLoading ? <SkeletonGauges count={6} /> : (
+                                    <div className="row g-2">
+                                        {hourlyOeeByLine.map((line) => {
+                                            const eff = line.reports > 0 ? line.performance : 0;
+                                            const isRunning = line.reports > 0 && line.production > 0;
+                                            const borderColor = eff >= 85 ? '#4caf50' : eff >= 60 ? '#ff9800' : eff > 0 ? '#f44336' : '#e0e0e0';
+                                            return (
+                                                <div key={line.name} className="col-6 col-md-4 col-xl-2">
+                                                    <div className="rounded-3 p-1 h-100 text-center" style={{ background: `${borderColor}06`, borderLeft: `5px solid ${borderColor}`, boxShadow: '0 2px 4px rgba(0,0,0,0.04)', cursor: 'pointer', transition: 'transform 0.15s, box-shadow 0.15s' }}
+                                                        onClick={() => setSelectedLine(line)}
+                                                        onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.1)'; }}
+                                                        onMouseLeave={e => { e.currentTarget.style.transform = ''; e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.04)'; }}>
+                                                        <SpeedGauge value={eff} color={borderColor} size={140} />
+                                                        <div style={{ fontWeight: 800, fontSize: '0.85rem' }}>{line.name}</div>
+                                                        <span className="px-2 py-0 rounded-pill d-inline-block mb-1" style={{ fontSize: '0.6rem', fontWeight: 600, background: isRunning ? '#e8f5e9' : '#ffebee', color: isRunning ? '#2e7d32' : '#c62828' }}>{isRunning ? 'Running' : 'Stopped'}</span>
+                                                        <div style={{ fontSize: '0.7rem', color: '#555', fontWeight: 600 }}><i className="ti ti-bottle me-1"></i>{formatN(Math.round(line.production))}</div>
+                                                        <div style={{ fontSize: '0.7rem', color: '#dc2626', fontWeight: 600 }}><i className="ti ti-clock-pause me-1"></i>{formatN(Math.round(line.downtime))}m</div>
+                                                        <div style={{ fontSize: '0.7rem', color: '#e65100', fontWeight: 600 }}><i className="ti ti-alert-triangle me-1"></i>{line.stoppageCount} Hour{line.stoppageCount !== 1 ? 's' : ''} submitted</div>
+                                                        <div style={{ fontSize: '0.6rem', color: '#94a3b8', marginTop: 2 }}>tap for details</div>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                            </div>
+                        )}
                     </div>
                 </div>
             ) : (
@@ -1261,7 +1308,7 @@ const Overview = () => {
             </> /* end non-slider mode */
             )}
             {/* ── Shift + Production Lines ────────── */}
-            <div className="rounded-3 px-2 py-1" style={{ background: '#fff', boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
+            {!sliderMode && <div className="rounded-3 px-2 py-1" style={{ background: '#fff', boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
             {/* ── Shift Label ─────────────────────── */}
             <div className="d-flex align-items-center justify-content-between mb-1 flex-wrap gap-1">
                 <div className="d-flex align-items-center gap-2 flex-wrap">
@@ -1338,7 +1385,7 @@ const Overview = () => {
                 })}
             </div>
             )}
-            </div>
+            </div>}
 
             {/* ── PET Details Modal ───────────────── */}
             {selectedLine && (
