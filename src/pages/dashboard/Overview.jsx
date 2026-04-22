@@ -117,6 +117,10 @@ const Overview = () => {
     const [shiftFilterDate, setShiftFilterDate] = useState(() => new Date().toISOString().split('T')[0]);
     const [shiftComparisonData, setShiftComparisonData] = useState({});
     const [showShiftComparison, setShowShiftComparison] = useState(false);
+    const [sliderMode, setSliderMode] = useState(false);
+    const [sliderIndex, setSliderIndex] = useState(0);
+    const [sliderSeconds, setSliderSeconds] = useState(6);
+    const sliderTimerRef = useRef(null);
 
     const loadData = useCallback(async () => {
         /* Cancel any in-flight request */
@@ -436,6 +440,14 @@ const Overview = () => {
     useEffect(() => {
         loadShiftData();
     }, [loadShiftData]);
+
+    /* Slider auto-advance */
+    const SLIDER_PANELS = 4; // Yesterday vs Today, Stoppages, Resources, Stoppage Categories + Shift
+    useEffect(() => {
+        if (!sliderMode) { clearInterval(sliderTimerRef.current); return; }
+        sliderTimerRef.current = setInterval(() => setSliderIndex(i => (i + 1) % SLIDER_PANELS), sliderSeconds * 1000);
+        return () => clearInterval(sliderTimerRef.current);
+    }, [sliderMode, sliderSeconds]);
 
     /* PETs available for the selected date (derived from reports) */
     const availablePets = useMemo(() => {
@@ -944,7 +956,98 @@ const Overview = () => {
             </div>
 
             {/* ── Yesterday vs Today Comparison ──── */}
-            <YesterdayTodayComparison />
+            {/* ── Slider Mode Toggle ──────────────── */}
+            <div className="d-flex align-items-center justify-content-end gap-2 mb-2">
+                {sliderMode && (
+                    <div className="d-flex align-items-center gap-1">
+                        <span style={{ fontSize: '0.75rem', color: '#64748b' }}>Interval:</span>
+                        {[4, 6, 10, 15].map(s => (
+                            <button key={s} onClick={() => setSliderSeconds(s)}
+                                className={`btn btn-xs px-2 py-0 ${sliderSeconds === s ? 'btn-primary' : 'btn-outline-secondary'}`}
+                                style={{ fontSize: '0.72rem', borderRadius: 4 }}>{s}s</button>
+                        ))}
+                        <div className="d-flex gap-1 ms-1">
+                            {Array.from({ length: SLIDER_PANELS }).map((_, i) => (
+                                <button key={i} onClick={() => setSliderIndex(i)} style={{ width: 8, height: 8, borderRadius: '50%', border: 'none', padding: 0, background: i === sliderIndex ? '#1d4ed8' : '#cbd5e1', cursor: 'pointer' }} />
+                            ))}
+                        </div>
+                    </div>
+                )}
+                <div className="d-flex align-items-center gap-2 px-2 py-1 rounded-3 shadow-sm" style={{ background: '#fff', border: '1px solid #e2e8f0' }}>
+                    <i className="ti ti-slideshow" style={{ color: '#64748b', fontSize: '0.9rem' }}></i>
+                    <span style={{ fontSize: '0.78rem', color: '#475569', fontWeight: 600 }}>Slider</span>
+                    <div className="form-check form-switch mb-0 ms-1">
+                        <input className="form-check-input" type="checkbox" checked={sliderMode} onChange={e => { setSliderMode(e.target.checked); setSliderIndex(0); }} style={{ cursor: 'pointer' }} />
+                    </div>
+                </div>
+            </div>
+
+            {/* ── Slider Panels ───────────────────── */}
+            {sliderMode ? (
+                <div style={{ position: 'relative', overflow: 'hidden' }}>
+                    <style>{`
+                        @keyframes slideIn { from { opacity: 0; transform: translateX(40px); } to { opacity: 1; transform: translateX(0); } }
+                        .slide-panel { animation: slideIn 0.4s ease; }
+                    `}</style>
+                    {/* Progress bar */}
+                    <div style={{ height: 3, background: '#e2e8f0', borderRadius: 2, marginBottom: 8, overflow: 'hidden' }}>
+                        <div key={sliderIndex} style={{ height: '100%', background: '#1d4ed8', borderRadius: 2, animation: `slideProgress ${sliderSeconds}s linear forwards` }} />
+                        <style>{`@keyframes slideProgress { from { width: 0% } to { width: 100% } }`}</style>
+                    </div>
+                    <div className="slide-panel" key={sliderIndex}>
+                        {sliderIndex === 0 && <YesterdayTodayComparison />}
+                        {sliderIndex === 1 && (() => {
+                            const petMap = {};
+                            rawStoppages.forEach(s => {
+                                const name = s.pet_name; if (!name) return;
+                                if (!petMap[name]) petMap[name] = { name, total: 0, downtime: 0, runTime: 0, stoppageCount: 0 };
+                                petMap[name].total += 1; petMap[name].downtime += s.downtime_minutes || 0;
+                                petMap[name].runTime += 60 - (s.downtime_minutes || 0); petMap[name].stoppageCount += (s.incidents?.length || 0);
+                            });
+                            const pets = Object.values(petMap).sort((a, b) => parseInt(a.name?.match(/(\d+)/)?.[0]||'999') - parseInt(b.name?.match(/(\d+)/)?.[0]||'999'));
+                            if (!pets.length) return <div className="text-center text-muted py-4">No stoppage data</div>;
+                            return (
+                                <div className="card mb-2">
+                                    <div className="card-header py-2 d-flex align-items-center gap-2"><i className="ti ti-table text-warning"></i><h6 className="mb-0 fw-bold">Stoppages per PET Line</h6><span className="badge bg-soft-warning text-warning ms-1">{activeDateLabel}</span></div>
+                                    <div className="card-body p-0"><div className="table-responsive"><table className="table table-sm table-hover mb-0" style={{ fontSize: '0.8rem' }}><thead style={{ background: '#f8fafc' }}><tr style={{ color: '#64748b' }}><th className="ps-3">PET Line</th><th className="text-center">Hours</th><th className="text-center">Run Time (min)</th><th className="text-center">Downtime (min)</th><th className="text-center">Incidents</th><th className="text-center">Downtime %</th></tr></thead><tbody>{pets.map(p => { const dtPct = p.total*60>0?(p.downtime/(p.total*60))*100:0; const color=dtPct>20?'#dc2626':dtPct>10?'#d97706':'#16a34a'; return <tr key={p.name}><td className="ps-3 fw-bold">{p.name}</td><td className="text-center">{p.total}</td><td className="text-center">{Math.round(p.runTime)}</td><td className="text-center" style={{color:'#dc2626',fontWeight:600}}>{Math.round(p.downtime)}</td><td className="text-center">{p.stoppageCount}</td><td className="text-center"><div className="d-flex align-items-center gap-1 justify-content-center"><div style={{width:60,height:6,background:'#e5e7eb',borderRadius:3,overflow:'hidden'}}><div style={{width:`${Math.min(dtPct,100)}%`,height:'100%',background:color,borderRadius:3}}/></div><span style={{fontSize:'0.75rem',fontWeight:700,color}}>{dtPct.toFixed(1)}%</span></div></td></tr>; })}</tbody><tfoot style={{background:'#f8fafc',fontWeight:700}}><tr><td className="ps-3">Total</td><td className="text-center">{pets.reduce((s,p)=>s+p.total,0)}</td><td className="text-center">{Math.round(pets.reduce((s,p)=>s+p.runTime,0))}</td><td className="text-center" style={{color:'#dc2626'}}>{Math.round(pets.reduce((s,p)=>s+p.downtime,0))}</td><td className="text-center">{pets.reduce((s,p)=>s+p.stoppageCount,0)}</td><td></td></tr></tfoot></table></div></div>
+                                </div>
+                            );
+                        })()}
+                        {sliderIndex === 2 && (() => {
+                            const totalDT = rawStoppages.reduce((s,r)=>s+(r.downtime_minutes||0),0);
+                            const mechDT = rawStoppages.reduce((s,r)=>s+(r.incidents||[]).filter(i=>(i.downtime_category_name||'').toLowerCase().includes('mechanical')).reduce((a,i)=>a+parseFloat(i.incident_duration||0),0),0);
+                            const plannedDT = rawStoppages.reduce((s,r)=>s+(r.incidents||[]).filter(i=>(i.downtime_category_name||'').toLowerCase().includes('planned')).reduce((a,i)=>a+parseFloat(i.incident_duration||0),0),0);
+                            const bottles = rawStoppages.reduce((s,r)=>s+(r.bottles_produced||0),0);
+                            const runMins = rawStoppages.length*60-totalDT;
+                            const CO2=0.006,SYRUP=0.25,MAT=28,ELEC=2.5,WATER=1.8;
+                            return (
+                                <div className="card mb-2">
+                                    <div className="card-header py-2 d-flex align-items-center gap-2"><i className="ti ti-leaf text-success"></i><h6 className="mb-0 fw-bold">Resources &amp; Yield Estimates</h6><span className="badge bg-soft-success text-success ms-1">{activeDateLabel}</span><span className="badge bg-soft-secondary text-secondary ms-1"><i className="ti ti-info-circle me-1"></i>Estimates</span></div>
+                                    <div className="card-body p-0">
+                                        <div className="d-flex flex-wrap gap-2 p-3 pb-2">{[{label:'CO₂ Yield',value:`${(bottles*CO2).toFixed(0)} kg`,icon:'ti-cloud',color:'#0ea5e9'},{label:'Syrup Yield',value:`${(bottles*SYRUP/1000).toFixed(0)} L`,icon:'ti-droplet',color:'#8b5cf6'},{label:'Material',value:`${(bottles*MAT/1000).toFixed(0)} kg`,icon:'ti-package',color:'#f59e0b'},{label:'Electricity',value:`${(runMins*ELEC).toFixed(0)} kWh`,icon:'ti-bolt',color:'#eab308'},{label:'Water',value:`${(bottles*WATER).toFixed(0)} L`,icon:'ti-droplets',color:'#06b6d4'}].map(stat=><div key={stat.label} className="d-flex align-items-center gap-2 px-3 py-2 rounded-3" style={{background:'#f8fafc',border:'1px solid #e2e8f0',minWidth:130}}><i className={`ti ${stat.icon}`} style={{color:stat.color,fontSize:'1.2rem'}}></i><div><div style={{fontSize:'0.7rem',color:'#94a3b8',fontWeight:600}}>{stat.label}</div><div style={{fontSize:'1rem',fontWeight:800,color:'#0f172a'}}>{stat.value}</div></div></div>)}</div>
+                                        <div className="table-responsive"><table className="table table-sm mb-0" style={{fontSize:'0.78rem'}}><thead style={{background:'#f8fafc'}}><tr style={{color:'#64748b'}}><th className="ps-3">Downtime Type</th><th className="text-center">Duration (min)</th><th className="text-center">CO₂ Loss (kg)</th><th className="text-center">Electricity Loss (kWh)</th></tr></thead><tbody>{[{label:'Total DT',mins:Math.round(totalDT),elec:(totalDT*ELEC*0.1).toFixed(1)},{label:'Mechanical DT',mins:Math.round(mechDT),elec:(mechDT*ELEC*0.1).toFixed(1)},{label:'Planned DT',mins:Math.round(plannedDT),elec:(plannedDT*ELEC*0.1).toFixed(1)}].map(r=><tr key={r.label}><td className="ps-3 fw-semibold">{r.label}</td><td className="text-center" style={{color:'#dc2626',fontWeight:600}}>{r.mins}</td><td className="text-center text-muted">—</td><td className="text-center text-muted">{r.elec}</td></tr>)}</tbody></table></div>
+                                    </div>
+                                </div>
+                            );
+                        })()}
+                        {sliderIndex === 3 && downtimeCategories.length > 0 && (() => {
+                            const max = downtimeCategories[0]?.value || 1;
+                            const total = downtimeCategories.reduce((s,c)=>s+c.value,0);
+                            return (
+                                <div className="card mb-2">
+                                    <div className="card-header py-2 d-flex align-items-center gap-2"><i className="ti ti-chart-bar text-danger"></i><h6 className="mb-0 fw-bold">Stoppage Categories</h6><span className="badge bg-soft-danger text-danger ms-1">{activeDateLabel}</span></div>
+                                    <div className="card-body py-3"><div className="d-flex flex-column gap-2">{downtimeCategories.map(cat=><div key={cat.name} className="d-flex align-items-center gap-2"><div style={{width:140,fontSize:'0.78rem',fontWeight:600,color:'#475569',textAlign:'right',flexShrink:0,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}} title={cat.name}>{cat.name}</div><div style={{flex:1,height:22,background:'#f1f5f9',borderRadius:4,overflow:'hidden'}}><div style={{width:`${(cat.value/max)*100}%`,height:'100%',background:cat.color,borderRadius:4,display:'flex',alignItems:'center',paddingLeft:8,minWidth:40}}><span style={{fontSize:'0.72rem',fontWeight:700,color:'#fff',whiteSpace:'nowrap'}}>{cat.value} min</span></div></div><div style={{width:48,fontSize:'0.78rem',fontWeight:700,color:cat.color,textAlign:'right',flexShrink:0}}>{((cat.value/total)*100).toFixed(1)}%</div></div>)}</div></div>
+                                </div>
+                            );
+                        })()}
+                        {sliderIndex === 3 && downtimeCategories.length === 0 && (
+                            <div className="card mb-2"><div className="card-body text-center text-muted py-4">No stoppage category data</div></div>
+                        )}
+                    </div>
+                </div>
+            ) : (
+                <>
+                <YesterdayTodayComparison />
 
             {/* ── Per-PET Stoppages Summary Table ── */}
             {(() => {
@@ -1155,6 +1258,9 @@ const Overview = () => {
             })()}
 
             {/* ── Shift + Production Lines ────────── */}
+            </> /* end non-slider mode */
+            )}
+            {/* ── Shift + Production Lines ────────── */}
             <div className="rounded-3 px-2 py-1" style={{ background: '#fff', boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
             {/* ── Shift Label ─────────────────────── */}
             <div className="d-flex align-items-center justify-content-between mb-1 flex-wrap gap-1">
@@ -1291,7 +1397,6 @@ const Overview = () => {
                         {[
                             { label: 'Time (Hours × 60)', value: `${selectedLine.stoppageCount * 60} min (${selectedLine.stoppageCount} hour${selectedLine.stoppageCount !== 1 ? 's' : ''} submitted)`, color: '#2e7d32' },
                             { label: 'Bottles Produced', value: formatN(Math.round(selectedLine.production)), color: '#1565c0' },
-                            { label: 'Downtime', value: `${Math.round(selectedLine.downtime)} min`, color: selectedLine.downtime > 30 ? '#f44336' : '#4caf50' },
                             { label: 'Planned Time', value: `${Math.round(selectedLine.perfRaw?.plannedTime || 0)} min`, color: '#555' },
                             { label: 'Total Downtime', value: `${Math.round(selectedLine.perfRaw?.totalDowntime || 0)} min`, color: '#555' },
                             { label: 'Mechanical Downtime', value: `${Math.round(selectedLine.perfRaw?.mechDowntime || 0)} min`, color: '#d97706' },
