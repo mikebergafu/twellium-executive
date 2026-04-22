@@ -1,7 +1,6 @@
 import axios from 'axios';
 
-const DEBUG = process.env.REACT_APP_DEBUG === 'true';
-const BASE_URL = DEBUG ? process.env.REACT_APP_BASE_URL : process.env.REACT_APP_BASE_URL_PROD;
+const BASE_URL = process.env.REACT_APP_BASE_URL;
 
 
 const api = axios.create({
