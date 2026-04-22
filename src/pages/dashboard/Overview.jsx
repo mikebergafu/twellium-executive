@@ -119,7 +119,7 @@ const Overview = () => {
     const [showShiftComparison, setShowShiftComparison] = useState(false);
     const [sliderMode, setSliderMode] = useState(false);
     const [sliderIndex, setSliderIndex] = useState(0);
-    const [sliderSeconds, setSliderSeconds] = useState(6);
+    const [sliderSeconds, setSliderSeconds] = useState(10);
     const sliderTimerRef = useRef(null);
 
     const loadData = useCallback(async () => {
@@ -961,7 +961,7 @@ const Overview = () => {
                 {sliderMode && (
                     <div className="d-flex align-items-center gap-1">
                         <span style={{ fontSize: '0.75rem', color: '#64748b' }}>Interval:</span>
-                        {[4, 6, 10, 15].map(s => (
+                        {[10, 20, 30].map(s => (
                             <button key={s} onClick={() => setSliderSeconds(s)}
                                 className={`btn btn-xs px-2 py-0 ${sliderSeconds === s ? 'btn-primary' : 'btn-outline-secondary'}`}
                                 style={{ fontSize: '0.72rem', borderRadius: 4 }}>{s}s</button>
@@ -1009,23 +1009,76 @@ const Overview = () => {
                             return (
                                 <div className="card mb-2">
                                     <div className="card-header py-2 d-flex align-items-center gap-2"><i className="ti ti-table text-warning"></i><h6 className="mb-0 fw-bold">Stoppages per PET Line</h6><span className="badge bg-soft-warning text-warning ms-1">{activeDateLabel}</span></div>
-                                    <div className="card-body p-0"><div className="table-responsive"><table className="table table-sm table-hover mb-0" style={{ fontSize: '0.8rem' }}><thead style={{ background: '#f8fafc' }}><tr style={{ color: '#64748b' }}><th className="ps-3">PET Line</th><th className="text-center">Hours</th><th className="text-center">Run Time (min)</th><th className="text-center">Downtime (min)</th><th className="text-center">Incidents</th><th className="text-center">Downtime %</th></tr></thead><tbody>{pets.map(p => { const dtPct = p.total*60>0?(p.downtime/(p.total*60))*100:0; const color=dtPct>20?'#dc2626':dtPct>10?'#d97706':'#16a34a'; return <tr key={p.name}><td className="ps-3 fw-bold">{p.name}</td><td className="text-center">{p.total}</td><td className="text-center">{Math.round(p.runTime)}</td><td className="text-center" style={{color:'#dc2626',fontWeight:600}}>{Math.round(p.downtime)}</td><td className="text-center">{p.stoppageCount}</td><td className="text-center"><div className="d-flex align-items-center gap-1 justify-content-center"><div style={{width:60,height:6,background:'#e5e7eb',borderRadius:3,overflow:'hidden'}}><div style={{width:`${Math.min(dtPct,100)}%`,height:'100%',background:color,borderRadius:3}}/></div><span style={{fontSize:'0.75rem',fontWeight:700,color}}>{dtPct.toFixed(1)}%</span></div></td></tr>; })}</tbody><tfoot style={{background:'#f8fafc',fontWeight:700}}><tr><td className="ps-3">Total</td><td className="text-center">{pets.reduce((s,p)=>s+p.total,0)}</td><td className="text-center">{Math.round(pets.reduce((s,p)=>s+p.runTime,0))}</td><td className="text-center" style={{color:'#dc2626'}}>{Math.round(pets.reduce((s,p)=>s+p.downtime,0))}</td><td className="text-center">{pets.reduce((s,p)=>s+p.stoppageCount,0)}</td><td></td></tr></tfoot></table></div></div>
+                                    <div className="card-body p-2">
+                                        <div className="row g-2">
+                                            {pets.map(p => {
+                                                const dtPct = p.total*60>0 ? (p.downtime/(p.total*60))*100 : 0;
+                                                const color = dtPct>20?'#dc2626':dtPct>10?'#d97706':'#16a34a';
+                                                return (
+                                                    <div key={p.name} className="col-6 col-md-4 col-xl-2">
+                                                        <div className="rounded-3 p-2 h-100" style={{background:'#f8fafc',border:`1px solid ${color}40`,borderLeft:`4px solid ${color}`}}>
+                                                            <div className="fw-bold mb-2" style={{fontSize:'0.8rem',color:'#1e293b'}}>{p.name}</div>
+                                                            {[
+                                                                {label:'Hours',value:p.total,icon:'ti-clock',color:'#64748b'},
+                                                                {label:'Run Time',value:`${Math.round(p.runTime)} min`,icon:'ti-player-play',color:'#16a34a'},
+                                                                {label:'Downtime',value:`${Math.round(p.downtime)} min`,icon:'ti-clock-pause',color:'#dc2626'},
+                                                                {label:'Incidents',value:p.stoppageCount,icon:'ti-alert-triangle',color:'#d97706'},
+                                                                {label:'DT %',value:`${dtPct.toFixed(1)}%`,icon:'ti-percentage',color},
+                                                            ].map(s => (
+                                                                <div key={s.label} className="d-flex align-items-center gap-1 mb-1">
+                                                                    <i className={`ti ${s.icon}`} style={{color:s.color,fontSize:'0.85rem',width:16}}></i>
+                                                                    <span style={{fontSize:'0.7rem',color:'#64748b',flex:1}}>{s.label}</span>
+                                                                    <span style={{fontSize:'0.75rem',fontWeight:700,color:s.color}}>{s.value}</span>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
                                 </div>
                             );
                         })()}
                         {sliderIndex === 2 && (() => {
-                            const totalDT = rawStoppages.reduce((s,r)=>s+(r.downtime_minutes||0),0);
-                            const mechDT = rawStoppages.reduce((s,r)=>s+(r.incidents||[]).filter(i=>(i.downtime_category_name||'').toLowerCase().includes('mechanical')).reduce((a,i)=>a+parseFloat(i.incident_duration||0),0),0);
-                            const plannedDT = rawStoppages.reduce((s,r)=>s+(r.incidents||[]).filter(i=>(i.downtime_category_name||'').toLowerCase().includes('planned')).reduce((a,i)=>a+parseFloat(i.incident_duration||0),0),0);
-                            const bottles = rawStoppages.reduce((s,r)=>s+(r.bottles_produced||0),0);
-                            const runMins = rawStoppages.length*60-totalDT;
                             const CO2=0.006,SYRUP=0.25,MAT=28,ELEC=2.5,WATER=1.8;
+                            const petMap = {};
+                            rawStoppages.forEach(r => {
+                                const n = r.pet_name; if (!n) return;
+                                if (!petMap[n]) petMap[n] = { name: n, bottles: 0, runMins: 0 };
+                                petMap[n].bottles += r.bottles_produced || 0;
+                                petMap[n].runMins += 60 - (r.downtime_minutes || 0);
+                            });
+                            const pets = Object.values(petMap).sort((a,b) => parseInt(a.name?.match(/(\d+)/)?.[0]||'999') - parseInt(b.name?.match(/(\d+)/)?.[0]||'999'));
+                            if (!pets.length) return <div className="text-center text-muted py-4">No data</div>;
+                            const stats = (p) => [
+                                {label:'Bottles',value:p.bottles.toLocaleString(),icon:'ti-bottle',color:'#1d4ed8'},
+                                {label:'CO₂',value:`${(p.bottles*CO2).toFixed(1)} kg`,icon:'ti-cloud',color:'#0ea5e9'},
+                                {label:'Syrup',value:`${(p.bottles*SYRUP/1000).toFixed(1)} L`,icon:'ti-droplet',color:'#8b5cf6'},
+                                {label:'Material',value:`${(p.bottles*MAT/1000).toFixed(1)} kg`,icon:'ti-package',color:'#f59e0b'},
+                                {label:'Electricity',value:`${(p.runMins*ELEC).toFixed(0)} kWh`,icon:'ti-bolt',color:'#eab308'},
+                                {label:'Water',value:`${(p.bottles*WATER).toFixed(0)} L`,icon:'ti-droplets',color:'#06b6d4'},
+                            ];
                             return (
                                 <div className="card mb-2">
                                     <div className="card-header py-2 d-flex align-items-center gap-2"><i className="ti ti-leaf text-success"></i><h6 className="mb-0 fw-bold">Resources &amp; Yield Estimates</h6><span className="badge bg-soft-success text-success ms-1">{activeDateLabel}</span><span className="badge bg-soft-secondary text-secondary ms-1"><i className="ti ti-info-circle me-1"></i>Estimates</span></div>
-                                    <div className="card-body p-0">
-                                        <div className="d-flex flex-wrap gap-2 p-3 pb-2">{[{label:'CO₂ Yield',value:`${(bottles*CO2).toFixed(0)} kg`,icon:'ti-cloud',color:'#0ea5e9'},{label:'Syrup Yield',value:`${(bottles*SYRUP/1000).toFixed(0)} L`,icon:'ti-droplet',color:'#8b5cf6'},{label:'Material',value:`${(bottles*MAT/1000).toFixed(0)} kg`,icon:'ti-package',color:'#f59e0b'},{label:'Electricity',value:`${(runMins*ELEC).toFixed(0)} kWh`,icon:'ti-bolt',color:'#eab308'},{label:'Water',value:`${(bottles*WATER).toFixed(0)} L`,icon:'ti-droplets',color:'#06b6d4'}].map(stat=><div key={stat.label} className="d-flex align-items-center gap-2 px-3 py-2 rounded-3" style={{background:'#f8fafc',border:'1px solid #e2e8f0',minWidth:130}}><i className={`ti ${stat.icon}`} style={{color:stat.color,fontSize:'1.2rem'}}></i><div><div style={{fontSize:'0.7rem',color:'#94a3b8',fontWeight:600}}>{stat.label}</div><div style={{fontSize:'1rem',fontWeight:800,color:'#0f172a'}}>{stat.value}</div></div></div>)}</div>
-                                        <div className="table-responsive"><table className="table table-sm mb-0" style={{fontSize:'0.78rem'}}><thead style={{background:'#f8fafc'}}><tr style={{color:'#64748b'}}><th className="ps-3">Downtime Type</th><th className="text-center">Duration (min)</th><th className="text-center">CO₂ Loss (kg)</th><th className="text-center">Electricity Loss (kWh)</th></tr></thead><tbody>{[{label:'Total DT',mins:Math.round(totalDT),elec:(totalDT*ELEC*0.1).toFixed(1)},{label:'Mechanical DT',mins:Math.round(mechDT),elec:(mechDT*ELEC*0.1).toFixed(1)},{label:'Planned DT',mins:Math.round(plannedDT),elec:(plannedDT*ELEC*0.1).toFixed(1)}].map(r=><tr key={r.label}><td className="ps-3 fw-semibold">{r.label}</td><td className="text-center" style={{color:'#dc2626',fontWeight:600}}>{r.mins}</td><td className="text-center text-muted">—</td><td className="text-center text-muted">{r.elec}</td></tr>)}</tbody></table></div>
+                                    <div className="card-body p-2">
+                                        <div className="row g-2">
+                                            {pets.map(p => (
+                                                <div key={p.name} className="col-6 col-md-4 col-xl-2">
+                                                    <div className="rounded-3 p-2 h-100" style={{background:'#f8fafc',border:'1px solid #e2e8f0'}}>
+                                                        <div className="fw-bold mb-2" style={{fontSize:'0.8rem',color:'#1e293b'}}>{p.name}</div>
+                                                        {stats(p).map(s => (
+                                                            <div key={s.label} className="d-flex align-items-center gap-1 mb-1">
+                                                                <i className={`ti ${s.icon}`} style={{color:s.color,fontSize:'0.85rem',width:16}}></i>
+                                                                <span style={{fontSize:'0.7rem',color:'#64748b',flex:1}}>{s.label}</span>
+                                                                <span style={{fontSize:'0.75rem',fontWeight:700,color:'#0f172a'}}>{s.value}</span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
                                     </div>
                                 </div>
                             );
@@ -1098,7 +1151,6 @@ const Overview = () => {
 
             {/* ── Per-PET Stoppages Summary Table ── */}
             {(() => {
-                // Build per-PET aggregation from rawStoppages
                 const petMap = {};
                 rawStoppages.forEach(s => {
                     const name = s.pet_name;
@@ -1109,11 +1161,7 @@ const Overview = () => {
                     petMap[name].runTime += 60 - (s.downtime_minutes || 0);
                     petMap[name].stoppageCount += (s.incidents?.length || 0);
                 });
-                const pets = Object.values(petMap).sort((a, b) => {
-                    const aNum = parseInt(a.name?.match(/(\d+)/)?.[0] || '999');
-                    const bNum = parseInt(b.name?.match(/(\d+)/)?.[0] || '999');
-                    return aNum - bNum;
-                });
+                const pets = Object.values(petMap).sort((a, b) => parseInt(a.name?.match(/(\d+)/)?.[0]||'999') - parseInt(b.name?.match(/(\d+)/)?.[0]||'999'));
                 if (!pets.length) return null;
                 return (
                     <div className="card mb-2">
@@ -1122,54 +1170,32 @@ const Overview = () => {
                             <h6 className="mb-0 fw-bold">Stoppages per PET Line</h6>
                             <span className="badge bg-soft-warning text-warning ms-1">{activeDateLabel}</span>
                         </div>
-                        <div className="card-body p-0">
-                            <div className="table-responsive">
-                                <table className="table table-sm table-hover mb-0" style={{ fontSize: '0.8rem' }}>
-                                    <thead style={{ background: '#f8fafc' }}>
-                                        <tr style={{ color: '#64748b' }}>
-                                            <th className="ps-3">PET Line</th>
-                                            <th className="text-center">Hours Submitted</th>
-                                            <th className="text-center">Run Time (min)</th>
-                                            <th className="text-center">Downtime (min)</th>
-                                            <th className="text-center">Incidents</th>
-                                            <th className="text-center">Downtime %</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {pets.map(p => {
-                                            const totalTime = p.total * 60;
-                                            const dtPct = totalTime > 0 ? (p.downtime / totalTime) * 100 : 0;
-                                            const color = dtPct > 20 ? '#dc2626' : dtPct > 10 ? '#d97706' : '#16a34a';
-                                            return (
-                                                <tr key={p.name}>
-                                                    <td className="ps-3 fw-bold">{p.name}</td>
-                                                    <td className="text-center">{p.total}</td>
-                                                    <td className="text-center">{Math.round(p.runTime)}</td>
-                                                    <td className="text-center" style={{ color: '#dc2626', fontWeight: 600 }}>{Math.round(p.downtime)}</td>
-                                                    <td className="text-center">{p.stoppageCount}</td>
-                                                    <td className="text-center">
-                                                        <div className="d-flex align-items-center gap-1 justify-content-center">
-                                                            <div style={{ width: 60, height: 6, background: '#e5e7eb', borderRadius: 3, overflow: 'hidden' }}>
-                                                                <div style={{ width: `${Math.min(dtPct, 100)}%`, height: '100%', background: color, borderRadius: 3 }} />
-                                                            </div>
-                                                            <span style={{ fontSize: '0.75rem', fontWeight: 700, color }}>{dtPct.toFixed(1)}%</span>
-                                                        </div>
-                                                    </td>
-                                                </tr>
-                                            );
-                                        })}
-                                    </tbody>
-                                    <tfoot style={{ background: '#f8fafc', fontWeight: 700 }}>
-                                        <tr>
-                                            <td className="ps-3">Total</td>
-                                            <td className="text-center">{pets.reduce((s, p) => s + p.total, 0)}</td>
-                                            <td className="text-center">{Math.round(pets.reduce((s, p) => s + p.runTime, 0))}</td>
-                                            <td className="text-center" style={{ color: '#dc2626' }}>{Math.round(pets.reduce((s, p) => s + p.downtime, 0))}</td>
-                                            <td className="text-center">{pets.reduce((s, p) => s + p.stoppageCount, 0)}</td>
-                                            <td></td>
-                                        </tr>
-                                    </tfoot>
-                                </table>
+                        <div className="card-body p-2">
+                            <div className="row g-2">
+                                {pets.map(p => {
+                                    const dtPct = p.total*60>0 ? (p.downtime/(p.total*60))*100 : 0;
+                                    const color = dtPct>20?'#dc2626':dtPct>10?'#d97706':'#16a34a';
+                                    return (
+                                        <div key={p.name} className="col-6 col-md-4 col-xl-2">
+                                            <div className="rounded-3 p-2 h-100" style={{ background: '#f8fafc', border: `1px solid ${color}40`, borderLeft: `4px solid ${color}` }}>
+                                                <div className="fw-bold mb-2" style={{ fontSize: '0.8rem', color: '#1e293b' }}>{p.name}</div>
+                                                {[
+                                                    {label:'Hours',value:p.total,icon:'ti-clock',color:'#64748b'},
+                                                    {label:'Run Time',value:`${Math.round(p.runTime)} min`,icon:'ti-player-play',color:'#16a34a'},
+                                                    {label:'Downtime',value:`${Math.round(p.downtime)} min`,icon:'ti-clock-pause',color:'#dc2626'},
+                                                    {label:'Incidents',value:p.stoppageCount,icon:'ti-alert-triangle',color:'#d97706'},
+                                                    {label:'DT %',value:`${dtPct.toFixed(1)}%`,icon:'ti-percentage',color},
+                                                ].map(s => (
+                                                    <div key={s.label} className="d-flex align-items-center gap-1 mb-1">
+                                                        <i className={`ti ${s.icon}`} style={{ color: s.color, fontSize: '0.85rem', width: 16 }}></i>
+                                                        <span style={{ fontSize: '0.7rem', color: '#64748b', flex: 1 }}>{s.label}</span>
+                                                        <span style={{ fontSize: '0.75rem', fontWeight: 700, color: s.color }}>{s.value}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    );
+                                })}
                             </div>
                         </div>
                     </div>
@@ -1178,83 +1204,48 @@ const Overview = () => {
 
             {/* ── Resources / Yield Stats Table ──── */}
             {(() => {
-                const totalHours = rawStoppages.length;
-                const totalDT = rawStoppages.reduce((s, r) => s + (r.downtime_minutes || 0), 0);
-                const mechDT = rawStoppages.reduce((s, r) => {
-                    const mech = (r.incidents || []).filter(i => (i.downtime_category_name || '').toLowerCase().includes('mechanical'));
-                    return s + mech.reduce((a, i) => a + parseFloat(i.incident_duration || 0), 0);
-                }, 0);
-                const plannedDT = rawStoppages.reduce((s, r) => {
-                    const planned = (r.incidents || []).filter(i => (i.downtime_category_name || '').toLowerCase().includes('planned'));
-                    return s + planned.reduce((a, i) => a + parseFloat(i.incident_duration || 0), 0);
-                }, 0);
-                const runMins = totalHours * 60 - totalDT;
-                const bottles = rawStoppages.reduce((s, r) => s + (r.bottles_produced || 0), 0);
-
-                // Estimated resource consumption (per-bottle industry averages, shown as estimates)
-                const CO2_PER_BOTTLE = 0.006;   // kg
-                const SYRUP_PER_BOTTLE = 0.25;  // ml (concentrate)
-                const MATERIAL_PER_BOTTLE = 28; // g (PET preform + cap + label)
-                const ELEC_PER_MIN = 2.5;        // kWh per run minute
-                const WATER_PER_BOTTLE = 1.8;   // L
-
-                const rows = [
-                    { label: 'Total DT', mins: Math.round(totalDT), co2: (totalDT * 0).toFixed(1), syrup: '—', material: '—', elec: (totalDT * ELEC_PER_MIN * 0.1).toFixed(1), water: '—', unit: 'min' },
-                    { label: 'Mechanical DT', mins: Math.round(mechDT), co2: '—', syrup: '—', material: '—', elec: (mechDT * ELEC_PER_MIN * 0.1).toFixed(1), water: '—', unit: 'min' },
-                    { label: 'Planned DT', mins: Math.round(plannedDT), co2: '—', syrup: '—', material: '—', elec: (plannedDT * ELEC_PER_MIN * 0.1).toFixed(1), water: '—', unit: 'min' },
+                const CO2=0.006,SYRUP=0.25,MAT=28,ELEC=2.5,WATER=1.8;
+                const petMap = {};
+                rawStoppages.forEach(r => {
+                    const n = r.pet_name; if (!n) return;
+                    if (!petMap[n]) petMap[n] = { name: n, bottles: 0, runMins: 0 };
+                    petMap[n].bottles += r.bottles_produced || 0;
+                    petMap[n].runMins += 60 - (r.downtime_minutes || 0);
+                });
+                const pets = Object.values(petMap).sort((a,b) => parseInt(a.name?.match(/(\d+)/)?.[0]||'999') - parseInt(b.name?.match(/(\d+)/)?.[0]||'999'));
+                if (!pets.length) return null;
+                const stats = (p) => [
+                    {label:'Bottles',value:p.bottles.toLocaleString(),icon:'ti-bottle',color:'#1d4ed8'},
+                    {label:'CO₂',value:`${(p.bottles*CO2).toFixed(1)} kg`,icon:'ti-cloud',color:'#0ea5e9'},
+                    {label:'Syrup',value:`${(p.bottles*SYRUP/1000).toFixed(1)} L`,icon:'ti-droplet',color:'#8b5cf6'},
+                    {label:'Material',value:`${(p.bottles*MAT/1000).toFixed(1)} kg`,icon:'ti-package',color:'#f59e0b'},
+                    {label:'Electricity',value:`${(p.runMins*ELEC).toFixed(0)} kWh`,icon:'ti-bolt',color:'#eab308'},
+                    {label:'Water',value:`${(p.bottles*WATER).toFixed(0)} L`,icon:'ti-droplets',color:'#06b6d4'},
                 ];
-
                 return (
                     <div className="card mb-2">
                         <div className="card-header py-2 d-flex align-items-center gap-2">
                             <i className="ti ti-leaf text-success"></i>
                             <h6 className="mb-0 fw-bold">Resources &amp; Yield Estimates</h6>
                             <span className="badge bg-soft-success text-success ms-1">{activeDateLabel}</span>
-                            <span className="badge bg-soft-secondary text-secondary ms-1" title="Values are estimates based on industry averages">
-                                <i className="ti ti-info-circle me-1"></i>Estimates
-                            </span>
+                            <span className="badge bg-soft-secondary text-secondary ms-1"><i className="ti ti-info-circle me-1"></i>Estimates</span>
                         </div>
-                        <div className="card-body p-0">
-                            {/* Summary stat pills */}
-                            <div className="d-flex flex-wrap gap-2 p-3 pb-2">
-                                {[
-                                    { label: 'CO₂ Yield', value: `${(bottles * CO2_PER_BOTTLE).toFixed(0)} kg`, icon: 'ti-cloud', color: '#0ea5e9' },
-                                    { label: 'Syrup Yield', value: `${(bottles * SYRUP_PER_BOTTLE / 1000).toFixed(0)} L`, icon: 'ti-droplet', color: '#8b5cf6' },
-                                    { label: 'Material', value: `${(bottles * MATERIAL_PER_BOTTLE / 1000).toFixed(0)} kg`, icon: 'ti-package', color: '#f59e0b' },
-                                    { label: 'Electricity', value: `${(runMins * ELEC_PER_MIN).toFixed(0)} kWh`, icon: 'ti-bolt', color: '#eab308' },
-                                    { label: 'Water', value: `${(bottles * WATER_PER_BOTTLE).toFixed(0)} L`, icon: 'ti-droplets', color: '#06b6d4' },
-                                ].map(stat => (
-                                    <div key={stat.label} className="d-flex align-items-center gap-2 px-3 py-2 rounded-3" style={{ background: '#f8fafc', border: '1px solid #e2e8f0', minWidth: 130 }}>
-                                        <i className={`ti ${stat.icon}`} style={{ color: stat.color, fontSize: '1.2rem' }}></i>
-                                        <div>
-                                            <div style={{ fontSize: '0.7rem', color: '#94a3b8', fontWeight: 600 }}>{stat.label}</div>
-                                            <div style={{ fontSize: '1rem', fontWeight: 800, color: '#0f172a' }}>{stat.value}</div>
+                        <div className="card-body p-2">
+                            <div className="row g-2">
+                                {pets.map(p => (
+                                    <div key={p.name} className="col-6 col-md-4 col-xl-2">
+                                        <div className="rounded-3 p-2 h-100" style={{ background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+                                            <div className="fw-bold mb-2" style={{ fontSize: '0.8rem', color: '#1e293b' }}>{p.name}</div>
+                                            {stats(p).map(s => (
+                                                <div key={s.label} className="d-flex align-items-center gap-1 mb-1">
+                                                    <i className={`ti ${s.icon}`} style={{ color: s.color, fontSize: '0.85rem', width: 16 }}></i>
+                                                    <span style={{ fontSize: '0.7rem', color: '#64748b', flex: 1 }}>{s.label}</span>
+                                                    <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#0f172a' }}>{s.value}</span>
+                                                </div>
+                                            ))}
                                         </div>
                                     </div>
                                 ))}
-                            </div>
-                            {/* DT breakdown table */}
-                            <div className="table-responsive">
-                                <table className="table table-sm mb-0" style={{ fontSize: '0.78rem' }}>
-                                    <thead style={{ background: '#f8fafc' }}>
-                                        <tr style={{ color: '#64748b' }}>
-                                            <th className="ps-3">Downtime Type</th>
-                                            <th className="text-center">Duration (min)</th>
-                                            <th className="text-center">CO₂ Loss (kg)</th>
-                                            <th className="text-center">Electricity Loss (kWh)</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {rows.map(r => (
-                                            <tr key={r.label}>
-                                                <td className="ps-3 fw-semibold">{r.label}</td>
-                                                <td className="text-center" style={{ color: '#dc2626', fontWeight: 600 }}>{r.mins}</td>
-                                                <td className="text-center text-muted">{r.co2}</td>
-                                                <td className="text-center text-muted">{r.elec}</td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
                             </div>
                         </div>
                     </div>
