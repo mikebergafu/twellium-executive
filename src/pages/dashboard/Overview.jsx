@@ -506,7 +506,7 @@ const Overview = () => {
 
         const availability = reportAvail || stoppageEff;
         const performance = reportPerf || stoppagePerf;
-        const quality = reportQual || 100;
+        const quality = reportQual || 0;
         const oeeValue = (availability > 0 || performance > 0) ? (clamp(availability) / 100) * (clamp(performance) / 100) * (clamp(quality) / 100) * 100 : 0;
 
         const oee = {
@@ -915,52 +915,8 @@ const Overview = () => {
                 </div>
             </div>
 
-            {/* ── OEE Gauges ─────────────────────── */}
-            <div className="card mb-2">
-                <div className="card-header d-flex align-items-center justify-content-between flex-wrap gap-1 py-1">
-                    <h6 className="mb-0">
-                        Overall Equipment Effectiveness (Efficiency)
-                        <span className="badge bg-soft-info text-info ms-2 fs-11">
-                            <i className="ti ti-calendar me-1"></i>{oeeDate}
-                        </span>
-                        <span className="badge bg-soft-primary text-primary ms-2 fs-11">
-                            <i className="ti ti-file-text me-1"></i>{rawStoppages.length} stoppage{rawStoppages.length !== 1 ? 's' : ''} today
-                        </span>
-                    </h6>
-                    <div className="d-flex align-items-center gap-2">
-                        <input type="date" className="form-control form-control-sm" value={oeeDate}
-                            onChange={(e) => setOeeDate(e.target.value)}
-                            max={new Date().toISOString().split('T')[0]}
-                            style={{ width: 'auto' }} />
-                        <button className="btn btn-sm btn-outline-primary" onClick={() => setShowReportsModal(true)}>
-                            <i className="ti ti-alert-triangle me-1"></i>View Stoppages
-                        </button>
-                    </div>
-                </div>
-                <div className="card-body py-2">
-                    {oeeLoading ? (
-                        <div className="text-center py-3"><div className="spinner-border text-primary" role="status" /></div>
-                    ) : (
-                    <div className="row g-2">
-                        <div className="col-lg-4 col-sm-6 d-flex justify-content-center">
-                            <OeeGauge value={oee.availability} label="Availability"
-                                calculation={oee.rawValues ? `(${Number(oee.rawValues.plannedMins||0).toFixed(0)} - ${Number(oee.rawValues.totalDowntimeMins||0).toFixed(0)}) / (${Number(oee.rawValues.plannedMins||0).toFixed(0)} - ${Number(oee.rawValues.mechDowntimeMins||0).toFixed(0)}) × 100 = ${oee.availability.toFixed(1)}%` : ''}
-                                rawValues={oee.rawValues ? { display: `(${Number(oee.rawValues.plannedMins||0).toFixed(0)} - ${Number(oee.rawValues.totalDowntimeMins||0).toFixed(0)}) / (${Number(oee.rawValues.plannedMins||0).toFixed(0)} - ${Number(oee.rawValues.mechDowntimeMins||0).toFixed(0)}) × 100`, reason: oee.availability === 0 ? (oee.rawValues.plannedMins === 0 ? 'Planned Time = 0' : 'Availability = 0%') : null } : null} />
-                        </div>
-                        <div className="col-lg-4 col-sm-6 d-flex justify-content-center">
-                            <OeeGauge value={100} label="Quality"
-                                      rawValues={oee.rawValues ? { display: `(${Number(oee.rawValues.totalProduction||0).toLocaleString()} - ${Number(oee.rawValues.fillerRejects||0).toLocaleString()}) / ${Number(oee.rawValues.totalProduction||0).toLocaleString()} × 100`, reason: oee.quality === 0 ? (oee.rawValues.totalProduction === 0 ? 'Total Production = 0' : 'Quality = 0%') : null } : null} />
-
-                        </div>
-                        <div className="col-lg-4 col-sm-6 d-flex justify-content-center">
-                            <OeeGauge value={oee.performance} label="Performance"
-                                calculation={oee.rawValues ? `(${Number(oee.rawValues.plannedMins||0).toFixed(0)} - ${Number(oee.rawValues.totalDowntimeMins||0).toFixed(0)}) / (${Number(oee.rawValues.plannedMins||0).toFixed(0)} - ${Number(oee.rawValues.plannedDowntimeMins||0).toFixed(0)}) × 100 = ${oee.performance.toFixed(1)}%` : ''}
-                                rawValues={oee.rawValues ? { display: `(${Number(oee.rawValues.plannedMins||0).toFixed(0)} - ${Number(oee.rawValues.totalDowntimeMins||0).toFixed(0)}) / (${Number(oee.rawValues.plannedMins||0).toFixed(0)} - ${Number(oee.rawValues.plannedDowntimeMins||0).toFixed(0)}) × 100`, reason: oee.performance === 0 ? 'Operational Time = 0' : null } : null} />
-                        </div>
-                    </div>
-                    )}
-                </div>
-            </div>
+            {/* ── Yesterday vs Today Comparison ──── */}
+            <YesterdayTodayComparison />
 
             {/* ── Shift Production Metrics ─────────── */}
             <div className="rounded-3 px-2 py-1 mb-2" style={{ background: '#fff', boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
@@ -1030,8 +986,51 @@ const Overview = () => {
             )}
             </div>
 
-            {/* ── Yesterday vs Today Comparison ──── */}
-            <YesterdayTodayComparison />
+            {/* ── OEE Gauges ─────────────────────── */}
+            <div className="card mb-2">
+                <div className="card-header d-flex align-items-center justify-content-between flex-wrap gap-1 py-1">
+                    <h6 className="mb-0">
+                        Overall Equipment Effectiveness (Efficiency)
+                        <span className="badge bg-soft-info text-info ms-2 fs-11">
+                            <i className="ti ti-calendar me-1"></i>{oeeDate}
+                        </span>
+                        <span className="badge bg-soft-primary text-primary ms-2 fs-11">
+                            <i className="ti ti-file-text me-1"></i>{rawStoppages.length} stoppage{rawStoppages.length !== 1 ? 's' : ''} today
+                        </span>
+                    </h6>
+                    <div className="d-flex align-items-center gap-2">
+                        <input type="date" className="form-control form-control-sm" value={oeeDate}
+                            onChange={(e) => setOeeDate(e.target.value)}
+                            max={new Date().toISOString().split('T')[0]}
+                            style={{ width: 'auto' }} />
+                        <button className="btn btn-sm btn-outline-primary" onClick={() => setShowReportsModal(true)}>
+                            <i className="ti ti-alert-triangle me-1"></i>View Stoppages
+                        </button>
+                    </div>
+                </div>
+                <div className="card-body py-2">
+                    {oeeLoading ? (
+                        <div className="text-center py-3"><div className="spinner-border text-primary" role="status" /></div>
+                    ) : (
+                    <div className="row g-2">
+                        <div className="col-lg-4 col-sm-6 d-flex justify-content-center">
+                            <OeeGauge value={oee.availability} label="Availability"
+                                calculation={oee.rawValues ? `(${Number(oee.rawValues.plannedMins||0).toFixed(0)} - ${Number(oee.rawValues.totalDowntimeMins||0).toFixed(0)}) / (${Number(oee.rawValues.plannedMins||0).toFixed(0)} - ${Number(oee.rawValues.mechDowntimeMins||0).toFixed(0)}) × 100 = ${oee.availability.toFixed(1)}%` : ''}
+                                rawValues={oee.rawValues ? { display: `(${Number(oee.rawValues.plannedMins||0).toFixed(0)} - ${Number(oee.rawValues.totalDowntimeMins||0).toFixed(0)}) / (${Number(oee.rawValues.plannedMins||0).toFixed(0)} - ${Number(oee.rawValues.mechDowntimeMins||0).toFixed(0)}) × 100`, reason: oee.availability === 0 ? (oee.rawValues.plannedMins === 0 ? 'Planned Time = 0' : 'Availability = 0%') : null } : null} />
+                        </div>
+                        <div className="col-lg-4 col-sm-6 d-flex justify-content-center">
+                            <OeeGauge value={oee.quality} label="Quality"
+                                      rawValues={oee.rawValues ? { display: `(${Number(oee.rawValues.totalProduction||0).toLocaleString()} - ${Number(oee.rawValues.fillerRejects||0).toLocaleString()}) / ${Number(oee.rawValues.totalProduction||0).toLocaleString()} × 100`, reason: oee.quality === 0 ? (oee.rawValues.totalProduction === 0 ? 'Total Production = 0' : 'Quality = 0%') : null } : null} />
+                        </div>
+                        <div className="col-lg-4 col-sm-6 d-flex justify-content-center">
+                            <OeeGauge value={oee.performance} label="Performance"
+                                calculation={oee.rawValues ? `(${Number(oee.rawValues.plannedMins||0).toFixed(0)} - ${Number(oee.rawValues.totalDowntimeMins||0).toFixed(0)}) / (${Number(oee.rawValues.plannedMins||0).toFixed(0)} - ${Number(oee.rawValues.plannedDowntimeMins||0).toFixed(0)}) × 100 = ${oee.performance.toFixed(1)}%` : ''}
+                                rawValues={oee.rawValues ? { display: `(${Number(oee.rawValues.plannedMins||0).toFixed(0)} - ${Number(oee.rawValues.totalDowntimeMins||0).toFixed(0)}) / (${Number(oee.rawValues.plannedMins||0).toFixed(0)} - ${Number(oee.rawValues.plannedDowntimeMins||0).toFixed(0)}) × 100`, reason: oee.performance === 0 ? 'Operational Time = 0' : null } : null} />
+                        </div>
+                    </div>
+                    )}
+                </div>
+            </div>
 
             {/* ── Slider Mode Toggle ──────────────── */}
             <div className="d-flex align-items-center justify-content-end gap-2 mb-2">
