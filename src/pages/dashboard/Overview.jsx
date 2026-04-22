@@ -442,7 +442,7 @@ const Overview = () => {
     }, [loadShiftData]);
 
     /* Slider auto-advance */
-    const SLIDER_PANELS = 5;
+    const SLIDER_PANELS = 6;
     useEffect(() => {
         if (!sliderMode) { clearInterval(sliderTimerRef.current); return; }
         sliderTimerRef.current = setInterval(() => setSliderIndex(i => (i + 1) % SLIDER_PANELS), sliderSeconds * 1000);
@@ -1158,7 +1158,64 @@ const Overview = () => {
                                 </div>
                             );
                         })()}
-                        {sliderIndex === 3 && downtimeCategories.length > 0 && (() => {
+                        {sliderIndex === 3 && (() => {
+                            const CO2=0.006, SYRUP=0.25;
+                            const petMap = {};
+                            rawStoppages.forEach(r => {
+                                const n = r.pet_name; if (!n) return;
+                                if (!petMap[n]) petMap[n] = { name: n, bottles: 0 };
+                                petMap[n].bottles += r.bottles_produced || 0;
+                            });
+                            const pets = Object.values(petMap).sort((a,b) => parseInt(a.name?.match(/(\d+)/)?.[0]||'999') - parseInt(b.name?.match(/(\d+)/)?.[0]||'999'));
+                            if (!pets.length) return <div className="text-center text-muted py-4">No data</div>;
+                            const totalBottles = pets.reduce((s,p)=>s+p.bottles,0);
+                            return (
+                                <div className="card mb-2">
+                                    <div className="card-header py-2 d-flex align-items-center gap-2">
+                                        <i className="ti ti-flask text-info"></i>
+                                        <h6 className="mb-0 fw-bold">CO₂ &amp; Syrup Yield</h6>
+                                        <span className="badge bg-soft-info text-info ms-1">{activeDateLabel}</span>
+                                        <span className="badge bg-soft-secondary text-secondary ms-auto">Total: {totalBottles.toLocaleString()} bottles</span>
+                                    </div>
+                                    <div className="card-body p-2">
+                                        <div className="d-flex gap-2">
+                                            {pets.map(p => {
+                                                const co2 = (p.bottles * CO2).toFixed(1);
+                                                const syrup = (p.bottles * SYRUP / 1000).toFixed(1);
+                                                const co2Pct = totalBottles > 0 ? ((p.bottles / totalBottles) * 100).toFixed(1) : 0;
+                                                return (
+                                                    <div key={p.name} style={{flex:1}}>
+                                                        <div className="rounded-3 p-2 h-100" style={{background:'#f0f9ff',border:'1px solid #bae6fd'}}>
+                                                            <div className="fw-bold mb-2" style={{fontSize:'0.8rem',color:'#0c4a6e'}}>{p.name}</div>
+                                                            <div className="d-flex align-items-center gap-1 mb-1">
+                                                                <i className="ti ti-cloud" style={{color:'#0ea5e9',fontSize:'0.85rem',width:16}}></i>
+                                                                <span style={{fontSize:'0.7rem',color:'#64748b',flex:1}}>CO₂ Yield</span>
+                                                                <span style={{fontSize:'0.75rem',fontWeight:700,color:'#0ea5e9'}}>{co2} kg</span>
+                                                            </div>
+                                                            <div className="d-flex align-items-center gap-1 mb-1">
+                                                                <i className="ti ti-droplet" style={{color:'#8b5cf6',fontSize:'0.85rem',width:16}}></i>
+                                                                <span style={{fontSize:'0.7rem',color:'#64748b',flex:1}}>Syrup Yield</span>
+                                                                <span style={{fontSize:'0.75rem',fontWeight:700,color:'#8b5cf6'}}>{syrup} L</span>
+                                                            </div>
+                                                            <div className="d-flex align-items-center gap-1 mb-2">
+                                                                <i className="ti ti-bottle" style={{color:'#1d4ed8',fontSize:'0.85rem',width:16}}></i>
+                                                                <span style={{fontSize:'0.7rem',color:'#64748b',flex:1}}>Bottles</span>
+                                                                <span style={{fontSize:'0.75rem',fontWeight:700,color:'#1d4ed8'}}>{p.bottles.toLocaleString()}</span>
+                                                            </div>
+                                                            <div style={{height:4,background:'#e0f2fe',borderRadius:2,overflow:'hidden'}}>
+                                                                <div style={{width:`${co2Pct}%`,height:'100%',background:'#0ea5e9',borderRadius:2}} />
+                                                            </div>
+                                                            <div style={{fontSize:'0.65rem',color:'#94a3b8',textAlign:'right',marginTop:2}}>{co2Pct}% of total</div>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })()}
+                        {sliderIndex === 4 && downtimeCategories.length > 0 && (() => {
                             const max = downtimeCategories[0]?.value || 1;
                             const total = downtimeCategories.reduce((s,c)=>s+c.value,0);
                             return (
@@ -1177,10 +1234,10 @@ const Overview = () => {
                                 </div>
                             );
                         })()}
-                        {sliderIndex === 3 && downtimeCategories.length === 0 && (
+                        {sliderIndex === 4 && downtimeCategories.length === 0 && (
                             <div className="card mb-2"><div className="card-body text-center text-muted py-4">No stoppage category data</div></div>
                         )}
-                        {sliderIndex === 4 && downtimeCategories.length > 0 && (() => {
+                        {sliderIndex === 5 && downtimeCategories.length > 0 && (() => {
                             const allSubs = downtimeCategories.flatMap(cat => cat.subs?.map(s=>({...s,catColor:cat.color,catName:cat.name}))||[]).sort((a,b)=>b.value-a.value);
                             const subMax = allSubs[0]?.value || 1;
                             return (
@@ -1304,6 +1361,65 @@ const Overview = () => {
                                         </div>
                                     </div>
                                 ))}
+                            </div>
+                        </div>
+                    </div>
+                );
+            })()}
+
+            {/* ── CO₂ & Syrup Yield ──────────────── */}
+            {(() => {
+                const CO2=0.006, SYRUP=0.25;
+                const petMap = {};
+                rawStoppages.forEach(r => {
+                    const n = r.pet_name; if (!n) return;
+                    if (!petMap[n]) petMap[n] = { name: n, bottles: 0 };
+                    petMap[n].bottles += r.bottles_produced || 0;
+                });
+                const pets = Object.values(petMap).sort((a,b) => parseInt(a.name?.match(/(\d+)/)?.[0]||'999') - parseInt(b.name?.match(/(\d+)/)?.[0]||'999'));
+                if (!pets.length) return null;
+                const totalBottles = pets.reduce((s,p)=>s+p.bottles,0);
+                return (
+                    <div className="card mb-2">
+                        <div className="card-header py-2 d-flex align-items-center gap-2">
+                            <i className="ti ti-flask text-info"></i>
+                            <h6 className="mb-0 fw-bold">CO₂ &amp; Syrup Yield</h6>
+                            <span className="badge bg-soft-info text-info ms-1">{activeDateLabel}</span>
+                            <span className="badge bg-soft-secondary text-secondary ms-auto">Total: {totalBottles.toLocaleString()} bottles</span>
+                        </div>
+                        <div className="card-body p-2">
+                            <div className="d-flex gap-2">
+                                {pets.map(p => {
+                                    const co2 = (p.bottles * CO2).toFixed(1);
+                                    const syrup = (p.bottles * SYRUP / 1000).toFixed(1);
+                                    const co2Pct = totalBottles > 0 ? ((p.bottles / totalBottles) * 100).toFixed(1) : 0;
+                                    return (
+                                        <div key={p.name} style={{flex:1}}>
+                                            <div className="rounded-3 p-2 h-100" style={{ background: '#f0f9ff', border: '1px solid #bae6fd' }}>
+                                                <div className="fw-bold mb-2" style={{ fontSize: '0.8rem', color: '#0c4a6e' }}>{p.name}</div>
+                                                <div className="d-flex align-items-center gap-1 mb-1">
+                                                    <i className="ti ti-cloud" style={{ color: '#0ea5e9', fontSize: '0.85rem', width: 16 }}></i>
+                                                    <span style={{ fontSize: '0.7rem', color: '#64748b', flex: 1 }}>CO₂ Yield</span>
+                                                    <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#0ea5e9' }}>{co2} kg</span>
+                                                </div>
+                                                <div className="d-flex align-items-center gap-1 mb-1">
+                                                    <i className="ti ti-droplet" style={{ color: '#8b5cf6', fontSize: '0.85rem', width: 16 }}></i>
+                                                    <span style={{ fontSize: '0.7rem', color: '#64748b', flex: 1 }}>Syrup Yield</span>
+                                                    <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#8b5cf6' }}>{syrup} L</span>
+                                                </div>
+                                                <div className="d-flex align-items-center gap-1 mb-2">
+                                                    <i className="ti ti-bottle" style={{ color: '#1d4ed8', fontSize: '0.85rem', width: 16 }}></i>
+                                                    <span style={{ fontSize: '0.7rem', color: '#64748b', flex: 1 }}>Bottles</span>
+                                                    <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#1d4ed8' }}>{p.bottles.toLocaleString()}</span>
+                                                </div>
+                                                <div style={{ height: 4, background: '#e0f2fe', borderRadius: 2, overflow: 'hidden' }}>
+                                                    <div style={{ width: `${co2Pct}%`, height: '100%', background: '#0ea5e9', borderRadius: 2 }} />
+                                                </div>
+                                                <div style={{ fontSize: '0.65rem', color: '#94a3b8', textAlign: 'right', marginTop: 2 }}>{co2Pct}% of total</div>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
                             </div>
                         </div>
                     </div>
