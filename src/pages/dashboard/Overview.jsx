@@ -20,7 +20,7 @@ const DualGauge = ({ co2Pct, syrupPct, label, size = 200 }) => {
     const id = label.replace(/\s/g,'');
     return (
         <div className="d-flex flex-column align-items-center p-2 border rounded-3 shadow-sm" style={{background:'linear-gradient(135deg,#fff 0%,#f8f9fa 100%)'}}>
-            <h6 className="mb-1 text-center fw-semibold" style={{fontSize:size*0.075}}>{label}</h6>
+            <h6 className="mb-1 text-center fw-semibold" style={{fontSize:size*0.1}}>{label}</h6>
             <svg width={size} height={size*0.75} viewBox={`0 0 ${size} ${size*0.75}`}>
                 <defs><filter id={`sh-${id}`}><feDropShadow dx="0" dy="1" stdDeviation="2" floodOpacity="0.2"/></filter></defs>
                 <path d={arc(startA,endA)} fill="none" stroke="#e5e7eb" strokeWidth={sw} strokeLinecap="round"/>
@@ -28,7 +28,7 @@ const DualGauge = ({ co2Pct, syrupPct, label, size = 200 }) => {
                 {co2Pct>0&&<path d={arc(startA,co2A)} fill="none" stroke="#bae6fd" strokeWidth={sw*0.45} strokeLinecap="round"/>}
                 {/* Syrup arc fill */}
                 {syrupPct>0&&<path d={arc(startA,syrupA)} fill="none" stroke="#ede9fe" strokeWidth={sw*0.45} strokeLinecap="round" opacity={0.7}/>}
-                {[0,25,50,75,100].map(t => { const a=startA-(range*t)/100, pos={x:cx+(r+size*0.1)*Math.cos(a),y:cy-(r+size*0.1)*Math.sin(a)+2}; return <text key={t} x={pos.x} y={pos.y} textAnchor="middle" fontSize={size*0.055} fontWeight="600" fill="#6b7280">{t}</text>; })}
+                {[0,25,50,75,100].map(t => { const a=startA-(range*t)/100, pos={x:cx+(r+size*0.1)*Math.cos(a),y:cy-(r+size*0.1)*Math.sin(a)+2}; return <text key={t} x={pos.x} y={pos.y} textAnchor="middle" fontSize={size*0.07} fontWeight="600" fill="#6b7280">{t}</text>; })}
                 <g filter={`url(#sh-${id})`}>
                     {/* CO₂ needle — blue */}
                     <line x1={cx} y1={cy} x2={cx+(r-size*0.04)*Math.cos(co2A)} y2={cy-(r-size*0.04)*Math.sin(co2A)} stroke="#0ea5e9" strokeWidth={size*0.018} strokeLinecap="round"/>
@@ -36,12 +36,12 @@ const DualGauge = ({ co2Pct, syrupPct, label, size = 200 }) => {
                     <line x1={cx} y1={cy} x2={cx+(r-size*0.1)*Math.cos(syrupA)} y2={cy-(r-size*0.1)*Math.sin(syrupA)} stroke="#8b5cf6" strokeWidth={size*0.018} strokeLinecap="round"/>
                     <circle cx={cx} cy={cy} r={size*0.03} fill="#1f2937"/><circle cx={cx} cy={cy} r={size*0.015} fill="#fff"/>
                 </g>
-                <text x={cx} y={cy+size*0.15} textAnchor="middle" fontSize={size*0.075} fontWeight="700" fill="#0ea5e9">{co2Pct.toFixed(0)}</text>
-                <text x={cx} y={cy+size*0.24} textAnchor="middle" fontSize={size*0.075} fontWeight="700" fill="#8b5cf6">{syrupPct.toFixed(0)}</text>
+                <text x={cx} y={cy+size*0.15} textAnchor="middle" fontSize={size*0.095} fontWeight="700" fill="#0ea5e9">{co2Pct.toFixed(0)}</text>
+                <text x={cx} y={cy+size*0.24} textAnchor="middle" fontSize={size*0.095} fontWeight="700" fill="#8b5cf6">{syrupPct.toFixed(0)}</text>
             </svg>
             <div className="d-flex gap-2 mt-1">
-                <span style={{fontSize:'0.65rem',fontWeight:700,color:'#0ea5e9'}}>● CO₂ {co2Pct.toFixed(1)}</span>
-                <span style={{fontSize:'0.65rem',fontWeight:700,color:'#8b5cf6'}}>● Syrup {syrupPct.toFixed(1)}</span>
+                <span style={{fontSize:'0.8rem',fontWeight:700,color:'#0ea5e9'}}>● CO₂ {co2Pct.toFixed(1)}</span>
+                <span style={{fontSize:'0.8rem',fontWeight:700,color:'#8b5cf6'}}>● Syrup {syrupPct.toFixed(1)}</span>
             </div>
         </div>
     );
@@ -1349,7 +1349,7 @@ const Overview = () => {
                                                 />
                                             ))}
                                         </div>
-                                        <div className="text-center mt-1" style={{fontSize:'0.68rem',color:'#94a3b8'}}>Needles show CO₂ (blue) &amp; Syrup (purple) yield rate per run minute, normalized to best line = 100</div>
+                                        <div className="text-center mt-1" style={{fontSize:'0.8rem',color:'#94a3b8'}}>Needles show CO₂ (blue) &amp; Syrup (purple) yield rate per run minute, normalized to best line = 100</div>
                                     </div>
                                 </div>
                             );
@@ -1774,7 +1774,7 @@ const Overview = () => {
                                     />
                                 ))}
                             </div>
-                            <div className="text-center mt-1" style={{fontSize:'0.68rem',color:'#94a3b8'}}>Needles show CO₂ (blue) &amp; Syrup (purple) yield rate per run minute, normalized to best line = 100</div>
+                            <div className="text-center mt-1" style={{fontSize:'0.8rem',color:'#94a3b8'}}>Needles show CO₂ (blue) &amp; Syrup (purple) yield rate per run minute, normalized to best line = 100</div>
                         </div>
                     </div>
                 );
