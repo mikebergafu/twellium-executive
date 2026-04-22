@@ -1,5 +1,4 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { PieChart, Pie, Cell, Tooltip } from 'recharts';
 import { productionApi } from '../../api/production';
 import { useApiWithFilters } from '../../utils/useApiWithFilters';
 import { SkeletonGauges } from '../../components/ui/Skeletons';
@@ -963,6 +962,74 @@ const Overview = () => {
                 </div>
             </div>
 
+            {/* ── Shift Production Metrics ─────────── */}
+            <div className="rounded-3 px-2 py-1 mb-2" style={{ background: '#fff', boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
+            {/* ── Shift Label ─────────────────────── */}
+            <div className="d-flex align-items-center justify-content-between mb-1 flex-wrap gap-1">
+                <div className="d-flex align-items-center gap-2 flex-wrap">
+                    <h6 className="mb-0 fw-bold" style={{ fontSize: '1.05rem' }}>Shift Production Metrics</h6>
+                    {currentShiftInfo && (
+                        <span className="badge bg-primary" style={{ fontSize: '0.75rem' }}>{currentShiftInfo.name}</span>
+                    )}
+                    {currentShiftInfo?.lastUpdated && (
+                        <span style={{ fontSize: '0.8rem', color: '#64748b' }}>| Last Updated: {currentShiftInfo.lastUpdated}</span>
+                    )}
+                    {currentShiftInfo?.start_time && currentShiftInfo?.end_time && (
+                        <span style={{ fontSize: '0.8rem', color: '#64748b' }}>
+                            | Shift: {shiftDateLabel} {currentShiftInfo.start_time.slice(0,5)} - {currentShiftInfo.end_time.slice(0,5)}
+                        </span>
+                    )}
+                </div>
+                <div className="d-flex align-items-center gap-2">
+                    <input
+                        type="date"
+                        className="form-control form-control-sm border-0 shadow-sm"
+                        value={shiftFilterDate}
+                        onChange={(e) => setShiftFilterDate(e.target.value)}
+                        max={new Date().toISOString().split('T')[0]}
+                        style={{ width: '150px', background: '#f8fafc' }}
+                    />
+                    <div className="btn-group btn-group-sm">
+                        {shifts.sort((a, b) => a.name === 'DAY' ? -1 : b.name === 'DAY' ? 1 : 0).map(shift => (
+                            <button key={shift.id}
+                                className={`btn ${currentShiftInfo?.id === shift.id ? 'btn-primary' : 'btn-outline-secondary'}`}
+                                onClick={() => setSelectedShiftId(shift.id)}>
+                                {shift.name}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            </div>
+            {/* ── Production Line Cards Grid ──────── */}
+            {isLoading ? <SkeletonGauges count={6} /> : (
+            <div className="row g-2">
+                {hourlyOeeByLine.map((line) => {
+                    const eff = line.reports > 0 ? line.performance : 0;
+                    const isRunning = line.reports > 0 && line.production > 0;
+                    const borderColor = eff >= 85 ? '#4caf50' : eff >= 60 ? '#ff9800' : eff > 0 ? '#f44336' : '#e0e0e0';
+                    return (
+                        <div key={line.name} className="col-6 col-md-4 col-xl-2">
+                            <div className="rounded-3 p-1 h-100 text-center" style={{ background: `${borderColor}06`, borderLeft: `5px solid ${borderColor}`, boxShadow: '0 2px 4px rgba(0,0,0,0.04)', cursor: 'pointer', transition: 'transform 0.15s, box-shadow 0.15s' }}
+                                onClick={() => setSelectedLine(line)}
+                                onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.1)'; }}
+                                onMouseLeave={e => { e.currentTarget.style.transform = ''; e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.04)'; }}>
+                                <SpeedGauge value={eff} color={borderColor} size={140} />
+                                <div style={{ fontWeight: 800, fontSize: '0.85rem' }}>{line.name}</div>
+                                <span className="px-2 py-0 rounded-pill d-inline-block mb-1" style={{ fontSize: '0.6rem', fontWeight: 600, background: isRunning ? '#e8f5e9' : '#ffebee', color: isRunning ? '#2e7d32' : '#c62828' }}>
+                                    {isRunning ? 'Running' : 'Stopped'}
+                                </span>
+                                <div style={{ fontSize: '0.7rem', color: '#555', fontWeight: 600 }}><i className="ti ti-bottle me-1"></i>{formatN(Math.round(line.production))}</div>
+                                <div style={{ fontSize: '0.7rem', color: '#dc2626', fontWeight: 600 }}><i className="ti ti-clock-pause me-1"></i>{formatN(Math.round(line.downtime))}m</div>
+                                <div style={{ fontSize: '0.7rem', color: '#e65100', fontWeight: 600 }}><i className="ti ti-alert-triangle me-1"></i>{line.stoppageCount} Hour{line.stoppageCount !== 1 ? 's' : ''} submitted</div>
+                                <div style={{ fontSize: '0.6rem', color: '#94a3b8', marginTop: 2 }}>tap for details</div>
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
+            )}
+            </div>
+
             {/* ── Yesterday vs Today Comparison ──── */}
             {/* ── Slider Mode Toggle ──────────────── */}
             <div className="d-flex align-items-center justify-content-end gap-2 mb-2">
@@ -1059,34 +1126,33 @@ const Overview = () => {
                             });
                             const pets = Object.values(petMap).sort((a,b) => parseInt(a.name?.match(/(\d+)/)?.[0]||'999') - parseInt(b.name?.match(/(\d+)/)?.[0]||'999'));
                             if (!pets.length) return <div className="text-center text-muted py-4">No data</div>;
-                            const PIE_COLORS = ['#1d4ed8','#0ea5e9','#8b5cf6','#f59e0b','#16a34a','#dc2626','#06b6d4','#ec4899'];
-                            const metrics = [
-                                {label:'CO₂',unit:'kg',data:pets.map((p,i)=>({name:p.name,value:parseFloat((p.bottles*CO2).toFixed(1)),fill:PIE_COLORS[i%PIE_COLORS.length]}))},
-                                {label:'Syrup',unit:'L',data:pets.map((p,i)=>({name:p.name,value:parseFloat((p.bottles*SYRUP/1000).toFixed(1)),fill:PIE_COLORS[i%PIE_COLORS.length]}))},
-                                {label:'Material',unit:'kg',data:pets.map((p,i)=>({name:p.name,value:parseFloat((p.bottles*MAT/1000).toFixed(1)),fill:PIE_COLORS[i%PIE_COLORS.length]}))},
-                                {label:'Electricity',unit:'kWh',data:pets.map((p,i)=>({name:p.name,value:parseFloat((p.runMins*ELEC).toFixed(0)),fill:PIE_COLORS[i%PIE_COLORS.length]}))},
-                                {label:'Water',unit:'L',data:pets.map((p,i)=>({name:p.name,value:parseFloat((p.bottles*WATER).toFixed(0)),fill:PIE_COLORS[i%PIE_COLORS.length]}))},
+                            const stats = (p) => [
+                                {label:'Bottles',value:p.bottles.toLocaleString(),icon:'ti-bottle',color:'#1d4ed8'},
+                                {label:'CO₂',value:`${(p.bottles*CO2).toFixed(1)} kg`,icon:'ti-cloud',color:'#0ea5e9'},
+                                {label:'Syrup',value:`${(p.bottles*SYRUP/1000).toFixed(1)} L`,icon:'ti-droplet',color:'#8b5cf6'},
+                                {label:'Material',value:`${(p.bottles*MAT/1000).toFixed(1)} kg`,icon:'ti-package',color:'#f59e0b'},
+                                {label:'Electricity',value:`${(p.runMins*ELEC).toFixed(0)} kWh`,icon:'ti-bolt',color:'#eab308'},
+                                {label:'Water',value:`${(p.bottles*WATER).toFixed(0)} L`,icon:'ti-droplets',color:'#06b6d4'},
                             ];
                             return (
                                 <div className="card mb-2">
-                                    <div className="card-header py-2 d-flex align-items-center gap-2"><i className="ti ti-leaf text-success"></i><h6 className="mb-0 fw-bold">Resources &amp; Yield Estimates</h6><span className="badge bg-soft-success text-success ms-1">{activeDateLabel}</span><span className="badge bg-soft-secondary text-secondary ms-1"><i className="ti ti-info-circle me-1"></i>Estimates</span></div>
+                                    <div className="card-header py-2 d-flex align-items-center gap-2"><i className="ti ti-leaf text-success"></i><h6 className="mb-0 fw-bold">Resource Consumption</h6><span className="badge bg-soft-success text-success ms-1">{activeDateLabel}</span><span className="badge bg-soft-secondary text-secondary ms-1"><i className="ti ti-info-circle me-1"></i>Estimates</span></div>
                                     <div className="card-body p-2">
-                                        <div className="d-flex flex-nowrap justify-content-around gap-3" style={{overflowX:'auto'}}>
-                                            {metrics.map(m => (
-                                                <div key={m.label} className="text-center" style={{flexShrink:0}}>
-                                                    <div style={{fontSize:'0.72rem',fontWeight:700,color:'#475569',marginBottom:2}}>{m.label} ({m.unit})</div>
-                                                    <PieChart width={160} height={160}>
-                                                        <Pie data={m.data} cx={75} cy={75} innerRadius={42} outerRadius={68} dataKey="value" paddingAngle={2}>
-                                                            {m.data.map((d,i) => <Cell key={i} fill={d.fill} />)}
-                                                        </Pie>
-                                                        <Tooltip formatter={(v,n) => [`${v} ${m.unit}`, n]} contentStyle={{fontSize:'0.7rem',padding:'2px 6px'}} />
-                                                    </PieChart>
-                                                    <div style={{fontSize:'0.7rem',fontWeight:700,color:'#1e293b'}}>{m.data.reduce((s,d)=>s+d.value,0).toLocaleString()} {m.unit}</div>
+                                        <div className="d-flex gap-2">
+                                            {pets.map(p => (
+                                                <div key={p.name} style={{flex:1}}>
+                                                    <div className="rounded-3 p-2 h-100" style={{background:'#f8fafc',border:'1px solid #e2e8f0'}}>
+                                                        <div className="fw-bold mb-2" style={{fontSize:'0.8rem',color:'#1e293b'}}>{p.name}</div>
+                                                        {stats(p).map(s => (
+                                                            <div key={s.label} className="d-flex align-items-center gap-1 mb-1">
+                                                                <i className={`ti ${s.icon}`} style={{color:s.color,fontSize:'0.85rem',width:16}}></i>
+                                                                <span style={{fontSize:'0.7rem',color:'#64748b',flex:1}}>{s.label}</span>
+                                                                <span style={{fontSize:'0.75rem',fontWeight:700,color:'#0f172a'}}>{s.value}</span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
                                                 </div>
                                             ))}
-                                        </div>
-                                        <div className="d-flex flex-wrap gap-2 justify-content-center mt-2">
-                                            {pets.map((p,i) => <span key={p.name} className="d-flex align-items-center gap-1" style={{fontSize:'0.68rem'}}><span style={{width:8,height:8,borderRadius:'50%',background:PIE_COLORS[i%PIE_COLORS.length],display:'inline-block'}}></span>{p.name}</span>)}
                                         </div>
                                     </div>
                                 </div>
@@ -1097,38 +1163,15 @@ const Overview = () => {
                             const total = downtimeCategories.reduce((s,c)=>s+c.value,0);
                             return (
                                 <div className="card mb-2">
-                                    <div className="card-header py-2 d-flex align-items-center gap-2"><i className="ti ti-chart-bar text-danger"></i><h6 className="mb-0 fw-bold">Stoppage Categories</h6><span className="badge bg-soft-danger text-danger ms-1">{activeDateLabel}</span><span className="badge bg-danger ms-auto">{total} min total</span></div>
-                                    <div className="card-body py-3">
-                                        <div className="d-flex flex-column gap-3">
-                                            {downtimeCategories.map(cat => {
-                                                const pct = ((cat.value/total)*100).toFixed(1);
-                                                return (
-                                                    <div key={cat.name}>
-                                                        <div className="d-flex justify-content-between mb-1">
-                                                            <span style={{fontSize:'0.8rem',fontWeight:600,color:'#334155'}} title={cat.name}>{cat.name}</span>
-                                                            <span style={{fontSize:'0.8rem',fontWeight:700,color:cat.color}}>{cat.value} min <span style={{color:'#94a3b8',fontWeight:500}}>({pct}%)</span></span>
-                                                        </div>
-                                                        <div style={{height:18,background:'#f1f5f9',borderRadius:6,overflow:'hidden'}}>
-                                                            <div style={{width:`${(cat.value/max)*100}%`,height:'100%',background:cat.color,borderRadius:6,transition:'width 0.6s ease'}} />
-                                                        </div>
-                                                        {cat.subs?.length > 0 && (
-                                                            <div className="d-flex flex-column gap-1 mt-1 ps-3">
-                                                                {cat.subs.map(sub => (
-                                                                    <div key={sub.name}>
-                                                                        <div className="d-flex justify-content-between mb-1">
-                                                                            <span style={{fontSize:'0.72rem',color:'#64748b'}}>{sub.name}</span>
-                                                                            <span style={{fontSize:'0.72rem',fontWeight:600,color:'#64748b'}}>{sub.value} min</span>
-                                                                        </div>
-                                                                        <div style={{height:8,background:'#f1f5f9',borderRadius:4,overflow:'hidden'}}>
-                                                                            <div style={{width:`${(sub.value/cat.value)*100}%`,height:'100%',background:cat.color,opacity:0.5,borderRadius:4}} />
-                                                                        </div>
-                                                                    </div>
-                                                                ))}
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                );
-                                            })}
+                                    <div className="card-header py-2 d-flex align-items-center gap-2"><i className="ti ti-chart-bar text-danger"></i><h6 className="mb-0 fw-bold">Stoppage Categories</h6><span className="badge bg-danger ms-auto">{total} min</span></div>
+                                    <div className="card-body py-2">
+                                        <div className="d-flex flex-column gap-2">
+                                            {downtimeCategories.map(cat => { const pct=((cat.value/total)*100).toFixed(1); return (
+                                                <div key={cat.name}>
+                                                    <div className="d-flex justify-content-between mb-1"><span style={{fontSize:'0.8rem',fontWeight:600,color:'#334155'}}>{cat.name}</span><span style={{fontSize:'0.8rem',fontWeight:700,color:cat.color}}>{cat.value} min <span style={{color:'#94a3b8',fontWeight:500}}>({pct}%)</span></span></div>
+                                                    <div style={{height:14,background:'#f1f5f9',borderRadius:6,overflow:'hidden'}}><div style={{width:`${(cat.value/max)*100}%`,height:'100%',background:cat.color,borderRadius:6}} /></div>
+                                                </div>
+                                            ); })}
                                         </div>
                                     </div>
                                 </div>
@@ -1137,53 +1180,27 @@ const Overview = () => {
                         {sliderIndex === 3 && downtimeCategories.length === 0 && (
                             <div className="card mb-2"><div className="card-body text-center text-muted py-4">No stoppage category data</div></div>
                         )}
-                        {sliderIndex === 4 && (
-                            <div className="rounded-3 px-2 py-1" style={{ background: '#fff', boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
-                                <div className="d-flex align-items-center justify-content-between mb-1 flex-wrap gap-1">
-                                    <div className="d-flex align-items-center gap-2 flex-wrap">
-                                        <h6 className="mb-0 fw-bold" style={{ fontSize: '1.05rem' }}>Shift Production Metrics</h6>
-                                        {currentShiftInfo && <span className="badge bg-primary" style={{ fontSize: '0.75rem' }}>{currentShiftInfo.name}</span>}
-                                        {currentShiftInfo?.lastUpdated && <span style={{ fontSize: '0.8rem', color: '#64748b' }}>| Last Updated: {currentShiftInfo.lastUpdated}</span>}
-                                        {currentShiftInfo?.start_time && currentShiftInfo?.end_time && (
-                                            <span style={{ fontSize: '0.8rem', color: '#64748b' }}>| Shift: {shiftDateLabel} {currentShiftInfo.start_time.slice(0,5)} - {currentShiftInfo.end_time.slice(0,5)}</span>
-                                        )}
-                                    </div>
-                                    <div className="d-flex align-items-center gap-2">
-                                        <input type="date" className="form-control form-control-sm border-0 shadow-sm" value={shiftFilterDate} onChange={(e) => setShiftFilterDate(e.target.value)} max={new Date().toISOString().split('T')[0]} style={{ width: '150px', background: '#f8fafc' }} />
-                                        <div className="btn-group btn-group-sm">
-                                            {shifts.sort((a, b) => a.name === 'DAY' ? -1 : b.name === 'DAY' ? 1 : 0).map(shift => (
-                                                <button key={shift.id} className={`btn ${currentShiftInfo?.id === shift.id ? 'btn-primary' : 'btn-outline-secondary'}`} onClick={() => setSelectedShiftId(shift.id)}>{shift.name}</button>
-                                            ))}
-                                        </div>
+                        {sliderIndex === 4 && downtimeCategories.length > 0 && (() => {
+                            const allSubs = downtimeCategories.flatMap(cat => cat.subs?.map(s=>({...s,catColor:cat.color,catName:cat.name}))||[]).sort((a,b)=>b.value-a.value);
+                            const subMax = allSubs[0]?.value || 1;
+                            return (
+                                <div className="card mb-2">
+                                    <div className="card-header py-2 d-flex align-items-center gap-2"><i className="ti ti-list text-warning"></i><h6 className="mb-0 fw-bold">Sub-Categories</h6><span className="badge bg-warning ms-auto">{allSubs.length} types</span></div>
+                                    <div className="card-body py-2">
+                                        {allSubs.length > 0 ? (
+                                            <div className="d-flex flex-column gap-2">
+                                                {allSubs.map(sub => (
+                                                    <div key={sub.name+sub.catName}>
+                                                        <div className="d-flex justify-content-between mb-1"><span style={{fontSize:'0.78rem',fontWeight:600,color:'#334155'}}>{sub.name}</span><span style={{fontSize:'0.78rem',fontWeight:700,color:sub.catColor}}>{sub.value} min <span style={{fontSize:'0.7rem',color:'#94a3b8',fontWeight:400}}>({sub.catName})</span></span></div>
+                                                        <div style={{height:10,background:'#f1f5f9',borderRadius:4,overflow:'hidden'}}><div style={{width:`${(sub.value/subMax)*100}%`,height:'100%',background:sub.catColor,opacity:0.7,borderRadius:4}} /></div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        ) : <div className="text-muted text-center py-3" style={{fontSize:'0.8rem'}}>No sub-category data</div>}
                                     </div>
                                 </div>
-                                {isLoading ? <SkeletonGauges count={6} /> : (
-                                    <div className="row g-2">
-                                        {hourlyOeeByLine.map((line) => {
-                                            const eff = line.reports > 0 ? line.performance : 0;
-                                            const isRunning = line.reports > 0 && line.production > 0;
-                                            const borderColor = eff >= 85 ? '#4caf50' : eff >= 60 ? '#ff9800' : eff > 0 ? '#f44336' : '#e0e0e0';
-                                            return (
-                                                <div key={line.name} className="col-6 col-md-4 col-xl-2">
-                                                    <div className="rounded-3 p-1 h-100 text-center" style={{ background: `${borderColor}06`, borderLeft: `5px solid ${borderColor}`, boxShadow: '0 2px 4px rgba(0,0,0,0.04)', cursor: 'pointer', transition: 'transform 0.15s, box-shadow 0.15s' }}
-                                                        onClick={() => setSelectedLine(line)}
-                                                        onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.1)'; }}
-                                                        onMouseLeave={e => { e.currentTarget.style.transform = ''; e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.04)'; }}>
-                                                        <SpeedGauge value={eff} color={borderColor} size={140} />
-                                                        <div style={{ fontWeight: 800, fontSize: '0.85rem' }}>{line.name}</div>
-                                                        <span className="px-2 py-0 rounded-pill d-inline-block mb-1" style={{ fontSize: '0.6rem', fontWeight: 600, background: isRunning ? '#e8f5e9' : '#ffebee', color: isRunning ? '#2e7d32' : '#c62828' }}>{isRunning ? 'Running' : 'Stopped'}</span>
-                                                        <div style={{ fontSize: '0.7rem', color: '#555', fontWeight: 600 }}><i className="ti ti-bottle me-1"></i>{formatN(Math.round(line.production))}</div>
-                                                        <div style={{ fontSize: '0.7rem', color: '#dc2626', fontWeight: 600 }}><i className="ti ti-clock-pause me-1"></i>{formatN(Math.round(line.downtime))}m</div>
-                                                        <div style={{ fontSize: '0.7rem', color: '#e65100', fontWeight: 600 }}><i className="ti ti-alert-triangle me-1"></i>{line.stoppageCount} Hour{line.stoppageCount !== 1 ? 's' : ''} submitted</div>
-                                                        <div style={{ fontSize: '0.6rem', color: '#94a3b8', marginTop: 2 }}>tap for details</div>
-                                                    </div>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                )}
-                            </div>
-                        )}
+                            );
+                        })()}
                     </div>
                 </div>
             ) : (
@@ -1255,43 +1272,37 @@ const Overview = () => {
                 });
                 const pets = Object.values(petMap).sort((a,b) => parseInt(a.name?.match(/(\d+)/)?.[0]||'999') - parseInt(b.name?.match(/(\d+)/)?.[0]||'999'));
                 if (!pets.length) return null;
-                const PIE_COLORS = ['#1d4ed8','#0ea5e9','#8b5cf6','#f59e0b','#16a34a','#dc2626','#06b6d4','#ec4899'];
-                const metrics = [
-                    {label:'CO₂',unit:'kg',data:pets.map((p,i)=>({name:p.name,value:parseFloat((p.bottles*CO2).toFixed(1)),fill:PIE_COLORS[i%PIE_COLORS.length]}))},
-                    {label:'Syrup',unit:'L',data:pets.map((p,i)=>({name:p.name,value:parseFloat((p.bottles*SYRUP/1000).toFixed(1)),fill:PIE_COLORS[i%PIE_COLORS.length]}))},
-                    {label:'Material',unit:'kg',data:pets.map((p,i)=>({name:p.name,value:parseFloat((p.bottles*MAT/1000).toFixed(1)),fill:PIE_COLORS[i%PIE_COLORS.length]}))},
-                    {label:'Electricity',unit:'kWh',data:pets.map((p,i)=>({name:p.name,value:parseFloat((p.runMins*ELEC).toFixed(0)),fill:PIE_COLORS[i%PIE_COLORS.length]}))},
-                    {label:'Water',unit:'L',data:pets.map((p,i)=>({name:p.name,value:parseFloat((p.bottles*WATER).toFixed(0)),fill:PIE_COLORS[i%PIE_COLORS.length]}))},
+                const stats = (p) => [
+                    {label:'Bottles',value:p.bottles.toLocaleString(),icon:'ti-bottle',color:'#1d4ed8'},
+                    {label:'CO₂',value:`${(p.bottles*CO2).toFixed(1)} kg`,icon:'ti-cloud',color:'#0ea5e9'},
+                    {label:'Syrup',value:`${(p.bottles*SYRUP/1000).toFixed(1)} L`,icon:'ti-droplet',color:'#8b5cf6'},
+                    {label:'Material',value:`${(p.bottles*MAT/1000).toFixed(1)} kg`,icon:'ti-package',color:'#f59e0b'},
+                    {label:'Electricity',value:`${(p.runMins*ELEC).toFixed(0)} kWh`,icon:'ti-bolt',color:'#eab308'},
+                    {label:'Water',value:`${(p.bottles*WATER).toFixed(0)} L`,icon:'ti-droplets',color:'#06b6d4'},
                 ];
                 return (
                     <div className="card mb-2">
                         <div className="card-header py-2 d-flex align-items-center gap-2">
                             <i className="ti ti-leaf text-success"></i>
-                            <h6 className="mb-0 fw-bold">Resources &amp; Yield Estimates</h6>
+                            <h6 className="mb-0 fw-bold">Resource Consumption</h6>
                             <span className="badge bg-soft-success text-success ms-1">{activeDateLabel}</span>
                             <span className="badge bg-soft-secondary text-secondary ms-1"><i className="ti ti-info-circle me-1"></i>Estimates</span>
                         </div>
                         <div className="card-body p-2">
-                            <div className="d-flex flex-nowrap justify-content-around gap-3" style={{overflowX:'auto'}}>
-                                {metrics.map(m => (
-                                    <div key={m.label} className="text-center" style={{flexShrink:0}}>
-                                        <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#475569', marginBottom: 2 }}>{m.label} ({m.unit})</div>
-                                        <PieChart width={160} height={160}>
-                                            <Pie data={m.data} cx={75} cy={75} innerRadius={42} outerRadius={68} dataKey="value" paddingAngle={2}>
-                                                {m.data.map((d, i) => <Cell key={i} fill={d.fill} />)}
-                                            </Pie>
-                                            <Tooltip formatter={(v, n) => [`${v} ${m.unit}`, n]} contentStyle={{ fontSize: '0.7rem', padding: '2px 6px' }} />
-                                        </PieChart>
-                                        <div style={{ fontSize: '0.7rem', fontWeight: 700, color: '#1e293b' }}>{m.data.reduce((s,d)=>s+d.value,0).toLocaleString()} {m.unit}</div>
+                            <div className="d-flex gap-2">
+                                {pets.map(p => (
+                                    <div key={p.name} style={{flex:1}}>
+                                        <div className="rounded-3 p-2 h-100" style={{ background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+                                            <div className="fw-bold mb-2" style={{ fontSize: '0.8rem', color: '#1e293b' }}>{p.name}</div>
+                                            {stats(p).map(s => (
+                                                <div key={s.label} className="d-flex align-items-center gap-1 mb-1">
+                                                    <i className={`ti ${s.icon}`} style={{ color: s.color, fontSize: '0.85rem', width: 16 }}></i>
+                                                    <span style={{ fontSize: '0.7rem', color: '#64748b', flex: 1 }}>{s.label}</span>
+                                                    <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#0f172a' }}>{s.value}</span>
+                                                </div>
+                                            ))}
+                                        </div>
                                     </div>
-                                ))}
-                            </div>
-                            <div className="d-flex flex-wrap gap-2 justify-content-center mt-2">
-                                {pets.map((p, i) => (
-                                    <span key={p.name} className="d-flex align-items-center gap-1" style={{ fontSize: '0.68rem' }}>
-                                        <span style={{ width: 8, height: 8, borderRadius: '50%', background: PIE_COLORS[i % PIE_COLORS.length], display: 'inline-block' }}></span>
-                                        {p.name}
-                                    </span>
                                 ))}
                             </div>
                         </div>
@@ -1303,133 +1314,54 @@ const Overview = () => {
             {downtimeCategories.length > 0 && (() => {
                 const max = downtimeCategories[0]?.value || 1;
                 const total = downtimeCategories.reduce((s,c)=>s+c.value,0);
+                const allSubs = downtimeCategories.flatMap(cat => cat.subs?.map(s=>({...s,catColor:cat.color,catName:cat.name}))||[]).sort((a,b)=>b.value-a.value);
+                const subMax = allSubs[0]?.value || 1;
                 return (
-                    <div className="card mb-2">
-                        <div className="card-header py-2 d-flex align-items-center gap-2">
-                            <i className="ti ti-chart-bar text-danger"></i>
-                            <h6 className="mb-0 fw-bold">Stoppage Categories</h6>
-                            <span className="badge bg-soft-danger text-danger ms-1">{activeDateLabel}</span>
-                            <span className="badge bg-danger ms-auto">{total} min total</span>
-                        </div>
-                        <div className="card-body py-3">
-                            <div className="d-flex flex-column gap-3">
-                                {downtimeCategories.map(cat => {
-                                    const pct = ((cat.value/total)*100).toFixed(1);
-                                    return (
-                                        <div key={cat.name}>
-                                            <div className="d-flex justify-content-between mb-1">
-                                                <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#334155' }} title={cat.name}>{cat.name}</span>
-                                                <span style={{ fontSize: '0.8rem', fontWeight: 700, color: cat.color }}>{cat.value} min <span style={{ color: '#94a3b8', fontWeight: 500 }}>({pct}%)</span></span>
+                    <>
+                            <div className="card mb-2">
+                                <div className="card-header py-2 d-flex align-items-center gap-2">
+                                    <i className="ti ti-chart-bar text-danger"></i>
+                                    <h6 className="mb-0 fw-bold">Stoppage Categories</h6>
+                                    <span className="badge bg-soft-danger text-danger ms-1">{activeDateLabel}</span>
+                                    <span className="badge bg-danger ms-auto">{total} min</span>
+                                </div>
+                                <div className="card-body py-2">
+                                    <div className="d-flex flex-column gap-2">
+                                        {downtimeCategories.map(cat => { const pct=((cat.value/total)*100).toFixed(1); return (
+                                            <div key={cat.name}>
+                                                <div className="d-flex justify-content-between mb-1"><span style={{fontSize:'0.8rem',fontWeight:600,color:'#334155'}}>{cat.name}</span><span style={{fontSize:'0.8rem',fontWeight:700,color:cat.color}}>{cat.value} min <span style={{color:'#94a3b8',fontWeight:500}}>({pct}%)</span></span></div>
+                                                <div style={{height:14,background:'#f1f5f9',borderRadius:6,overflow:'hidden'}}><div style={{width:`${(cat.value/max)*100}%`,height:'100%',background:cat.color,borderRadius:6,transition:'width 0.6s ease'}} /></div>
                                             </div>
-                                            <div style={{ height: 18, background: '#f1f5f9', borderRadius: 6, overflow: 'hidden' }}>
-                                                <div style={{ width: `${(cat.value/max)*100}%`, height: '100%', background: cat.color, borderRadius: 6, transition: 'width 0.6s ease' }} />
-                                            </div>
-                                            {cat.subs?.length > 0 && (
-                                                <div className="d-flex flex-column gap-1 mt-1 ps-3">
-                                                    {cat.subs.map(sub => (
-                                                        <div key={sub.name}>
-                                                            <div className="d-flex justify-content-between mb-1">
-                                                                <span style={{ fontSize: '0.72rem', color: '#64748b' }}>{sub.name}</span>
-                                                                <span style={{ fontSize: '0.72rem', fontWeight: 600, color: '#64748b' }}>{sub.value} min</span>
-                                                            </div>
-                                                            <div style={{ height: 8, background: '#f1f5f9', borderRadius: 4, overflow: 'hidden' }}>
-                                                                <div style={{ width: `${(sub.value/cat.value)*100}%`, height: '100%', background: cat.color, opacity: 0.5, borderRadius: 4 }} />
-                                                            </div>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            )}
-                                        </div>
-                                    );
-                                })}
+                                        ); })}
+                                    </div>
+                                </div>
                             </div>
-                        </div>
-                    </div>
+                            <div className="card mb-2">
+                                <div className="card-header py-2 d-flex align-items-center gap-2">
+                                    <i className="ti ti-list text-warning"></i>
+                                    <h6 className="mb-0 fw-bold">Sub-Categories</h6>
+                                    <span className="badge bg-warning ms-auto">{allSubs.length} types</span>
+                                </div>
+                                <div className="card-body py-2">
+                                    {allSubs.length > 0 ? (
+                                        <div className="d-flex flex-column gap-2">
+                                            {allSubs.map(sub => (
+                                                <div key={sub.name+sub.catName}>
+                                                    <div className="d-flex justify-content-between mb-1"><span style={{fontSize:'0.78rem',fontWeight:600,color:'#334155'}}>{sub.name}</span><span style={{fontSize:'0.78rem',fontWeight:700,color:sub.catColor}}>{sub.value} min <span style={{fontSize:'0.7rem',color:'#94a3b8',fontWeight:400}}>({sub.catName})</span></span></div>
+                                                    <div style={{height:10,background:'#f1f5f9',borderRadius:4,overflow:'hidden'}}><div style={{width:`${(sub.value/subMax)*100}%`,height:'100%',background:sub.catColor,opacity:0.7,borderRadius:4}} /></div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    ) : <div className="text-muted text-center py-3" style={{fontSize:'0.8rem'}}>No sub-category data</div>}
+                                </div>
+                            </div>
+                    </>
                 );
             })()}
 
             {/* ── Shift + Production Lines ────────── */}
             </> /* end non-slider mode */
             )}
-            {/* ── Shift + Production Lines ────────── */}
-            {!sliderMode && <div className="rounded-3 px-2 py-1" style={{ background: '#fff', boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
-            {/* ── Shift Label ─────────────────────── */}
-            <div className="d-flex align-items-center justify-content-between mb-1 flex-wrap gap-1">
-                <div className="d-flex align-items-center gap-2 flex-wrap">
-                    <h6 className="mb-0 fw-bold" style={{ fontSize: '1.05rem' }}>Shift Production Metrics</h6>
-                    {currentShiftInfo && (
-                        <span className="badge bg-primary" style={{ fontSize: '0.75rem' }}>{currentShiftInfo.name}</span>
-                    )}
-                    {currentShiftInfo?.lastUpdated && (
-                        <span style={{ fontSize: '0.8rem', color: '#64748b' }}>| Last Updated: {currentShiftInfo.lastUpdated}</span>
-                    )}
-                    {currentShiftInfo?.start_time && currentShiftInfo?.end_time && (
-                        <span style={{ fontSize: '0.8rem', color: '#64748b' }}>
-                            | Shift: {shiftDateLabel} {currentShiftInfo.start_time.slice(0,5)} - {currentShiftInfo.end_time.slice(0,5)}
-                        </span>
-                    )}
-                </div>
-                <div className="d-flex align-items-center gap-2">
-                    <input
-                        type="date"
-                        className="form-control form-control-sm border-0 shadow-sm"
-                        value={shiftFilterDate}
-                        onChange={(e) => setShiftFilterDate(e.target.value)}
-                        max={new Date().toISOString().split('T')[0]}
-                        style={{ width: '150px', background: '#f8fafc' }}
-                    />
-                    <div className="btn-group btn-group-sm">
-                        {shifts.sort((a, b) => a.name === 'DAY' ? -1 : b.name === 'DAY' ? 1 : 0).map(shift => (
-                            <button key={shift.id}
-                                className={`btn ${currentShiftInfo?.id === shift.id ? 'btn-primary' : 'btn-outline-secondary'}`}
-                                onClick={() => setSelectedShiftId(shift.id)}>
-                                {shift.name}
-                            </button>
-                        ))}
-                    </div>
-                </div>
-            </div>
-
-            {/* ── Production Line Cards Grid ──────── */}
-            {isLoading ? <SkeletonGauges count={6} /> : (
-            <div className="row g-2">
-                {/* Individual line cards */}
-                {hourlyOeeByLine.map((line) => {
-                    const eff = line.reports > 0 ? line.performance : 0;
-                    const isRunning = line.reports > 0 && line.production > 0;
-                    const borderColor = eff >= 85 ? '#4caf50' : eff >= 60 ? '#ff9800' : eff > 0 ? '#f44336' : '#e0e0e0';
-                    return (
-                        <div key={line.name} className="col-6 col-md-4 col-xl-2">
-                            <div className="rounded-3 p-1 h-100 text-center" style={{ background: `${borderColor}06`, borderLeft: `5px solid ${borderColor}`, boxShadow: '0 2px 4px rgba(0,0,0,0.04)', cursor: 'pointer', transition: 'transform 0.15s, box-shadow 0.15s' }}
-                                onClick={() => setSelectedLine(line)}
-                                onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.1)'; }}
-                                onMouseLeave={e => { e.currentTarget.style.transform = ''; e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.04)'; }}>
-                                <SpeedGauge value={eff} color={borderColor} size={140} />
-                                <div style={{ fontWeight: 800, fontSize: '0.85rem' }}>{line.name}</div>
-                                <span className="px-2 py-0 rounded-pill d-inline-block mb-1" style={{
-                                    fontSize: '0.6rem', fontWeight: 600,
-                                    background: isRunning ? '#e8f5e9' : '#ffebee',
-                                    color: isRunning ? '#2e7d32' : '#c62828'
-                                }}>
-                                    {isRunning ? 'Running' : 'Stopped'}
-                                </span>
-                                <div style={{ fontSize: '0.7rem', color: '#555', fontWeight: 600 }}>
-                                    <i className="ti ti-bottle me-1"></i>{formatN(Math.round(line.production))}
-                                </div>
-                                <div style={{ fontSize: '0.7rem', color: '#dc2626', fontWeight: 600 }}>
-                                    <i className="ti ti-clock-pause me-1"></i>{formatN(Math.round(line.downtime))}m
-                                </div>
-                                <div style={{ fontSize: '0.7rem', color: '#e65100', fontWeight: 600 }}>
-                                    <i className="ti ti-alert-triangle me-1"></i>{line.stoppageCount} Hour{line.stoppageCount !== 1 ? 's' : ''} submitted
-                                </div>
-                                <div style={{ fontSize: '0.6rem', color: '#94a3b8', marginTop: 2 }}>tap for details</div>
-                            </div>
-                        </div>
-                    );
-                })}
-            </div>
-            )}
-            </div>}
 
             {/* ── PET Details Modal ───────────────── */}
             {selectedLine && (
