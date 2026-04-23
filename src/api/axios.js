@@ -1,4 +1,4 @@
-const BASE_URL = process.env.REACT_APP_BASE_URL;
+const BASE_URL = process.env.REACT_APP_BASE_URL || 'https://app.twellium-api.com/api';
 
 async function request(url, options = {}) {
     const token = localStorage.getItem('access_token');
