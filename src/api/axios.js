@@ -1,70 +1,61 @@
-import axios from 'axios';
-
 const BASE_URL = process.env.REACT_APP_BASE_URL;
 
+async function request(url, options = {}) {
+    const token = localStorage.getItem('access_token');
+    const headers = { 'Content-Type': 'application/json', ...options.headers };
+    if (token) headers.Authorization = `Bearer ${token}`;
 
-const api = axios.create({
-    baseURL: BASE_URL,
-    headers: {
-        'Content-Type': 'application/json',
-    },
-});
+    let response = await fetch(`${BASE_URL}${url}`, { ...options, headers });
 
-// Request interceptor to add token
-api.interceptors.request.use(
-    (config) => {
-        console.log(process.env.REACT_APP_DEBUG)
-        const token = localStorage.getItem('access_token');
-        if (token) {
-            config.headers.Authorization = `Bearer ${token}`;
-        }
-        return config;
-    },
-    (error) => Promise.reject(error)
-);
-
-
-api.interceptors.response.use(
-    (response) => {
-        // Unwrap the API envelope { status_code, message, data } so that
-        // response.data points directly at the inner payload.
-        if (response.data && typeof response.data === 'object' && 'status_code' in response.data && 'data' in response.data) {
-            response.data = response.data.data;
-        }
-        return response;
-    },
-    async (error) => {
-        const originalRequest = error.config;
-
-
-        if (error.response?.status === 401 && !originalRequest._retry) {
-            originalRequest._retry = true;
-            const refreshToken = localStorage.getItem('refresh_token');
-
-            if (refreshToken) {
-                try {
-                    const { data } = await axios.post(`${BASE_URL}/auth/token/refresh/`, {
-                        refresh: refreshToken,
-                    });
-
-                    // Direct axios call doesn't use our interceptor, so unwrap manually
-                    const tokenData = data?.data || data;
-                    localStorage.setItem('access_token', tokenData.access);
-                    api.defaults.headers.common['Authorization'] = `Bearer ${tokenData.access}`;
-
-                    return api(originalRequest);
-                } catch (refreshError) {
-
-                    localStorage.removeItem('access_token');
-                    localStorage.removeItem('refresh_token');
-                    localStorage.removeItem('user');
-                    window.location.href = '/login';
-                    return Promise.reject(refreshError);
-                }
+    // 401 → attempt token refresh
+    if (response.status === 401 && !options._retry) {
+        const refreshToken = localStorage.getItem('refresh_token');
+        if (refreshToken) {
+            try {
+                const refreshRes = await fetch(`${BASE_URL}/auth/token/refresh/`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ refresh: refreshToken }),
+                });
+                if (!refreshRes.ok) throw new Error('Refresh failed');
+                const refreshData = await refreshRes.json();
+                const tokenData = refreshData?.data || refreshData;
+                localStorage.setItem('access_token', tokenData.access);
+                headers.Authorization = `Bearer ${tokenData.access}`;
+                response = await fetch(`${BASE_URL}${url}`, { ...options, headers, _retry: true });
+            } catch {
+                localStorage.removeItem('access_token');
+                localStorage.removeItem('refresh_token');
+                localStorage.removeItem('user');
+                window.location.href = '/login';
+                throw new Error('Session expired');
             }
         }
-        return Promise.reject(error);
     }
-);
+
+    if (!response.ok) {
+        const error = new Error(`Request failed: ${response.status}`);
+        error.status = response.status;
+        throw error;
+    }
+
+    const data = await response.json();
+    // Unwrap API envelope { status_code, message, data } and wrap in { data } to match axios shape
+    if (data && typeof data === 'object' && 'status_code' in data && 'data' in data) {
+        return { data: data.data };
+    }
+    return { data };
+}
+
+const api = {
+    get: (url, { params } = {}) => {
+        const query = params ? '?' + new URLSearchParams(params).toString() : '';
+        return request(`${url}${query}`);
+    },
+    post: (url, body) => request(url, { method: 'POST', body: JSON.stringify(body) }),
+    put: (url, body) => request(url, { method: 'PUT', body: JSON.stringify(body) }),
+    patch: (url, body) => request(url, { method: 'PATCH', body: JSON.stringify(body) }),
+    delete: (url) => request(url, { method: 'DELETE' }),
+};
 
 export default api;
