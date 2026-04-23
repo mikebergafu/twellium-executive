@@ -1,35 +1,60 @@
 const BASE_URL = process.env.REACT_APP_BASE_URL || 'https://app.twellium-api.com/api';
 
+let refreshPromise = null;
+
+function isTokenExpiringSoon(token) {
+    try {
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        return payload.exp * 1000 - Date.now() < 60000; // less than 60s left
+    } catch {
+        return true;
+    }
+}
+
+async function refreshAccessToken() {
+    if (refreshPromise) return refreshPromise;
+    refreshPromise = (async () => {
+        const refreshToken = localStorage.getItem('refresh_token');
+        if (!refreshToken) throw new Error('No refresh token');
+        const res = await fetch(`${BASE_URL}/auth/token/refresh/`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ refresh: refreshToken }),
+        });
+        if (!res.ok) throw new Error('Refresh failed');
+        const json = await res.json();
+        const access = (json?.data || json).access;
+        localStorage.setItem('access_token', access);
+        return access;
+    })().finally(() => { refreshPromise = null; });
+    return refreshPromise;
+}
+
 async function request(url, options = {}) {
-    const token = localStorage.getItem('access_token');
+    let token = localStorage.getItem('access_token');
+
+    // Proactively refresh if token is expiring soon
+    if (token && isTokenExpiringSoon(token)) {
+        try { token = await refreshAccessToken(); } catch { /* will fail on 401 below */ }
+    }
+
     const headers = { 'Content-Type': 'application/json', ...options.headers };
     if (token) headers.Authorization = `Bearer ${token}`;
 
     let response = await fetch(`${BASE_URL}${url}`, { ...options, headers });
 
-    // 401 → attempt token refresh
+    // Reactive refresh on 401
     if (response.status === 401 && !options._retry) {
-        const refreshToken = localStorage.getItem('refresh_token');
-        if (refreshToken) {
-            try {
-                const refreshRes = await fetch(`${BASE_URL}/auth/token/refresh/`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ refresh: refreshToken }),
-                });
-                if (!refreshRes.ok) throw new Error('Refresh failed');
-                const refreshData = await refreshRes.json();
-                const tokenData = refreshData?.data || refreshData;
-                localStorage.setItem('access_token', tokenData.access);
-                headers.Authorization = `Bearer ${tokenData.access}`;
-                response = await fetch(`${BASE_URL}${url}`, { ...options, headers, _retry: true });
-            } catch {
-                localStorage.removeItem('access_token');
-                localStorage.removeItem('refresh_token');
-                localStorage.removeItem('user');
-                window.location.href = '/login';
-                throw new Error('Session expired');
-            }
+        try {
+            token = await refreshAccessToken();
+            headers.Authorization = `Bearer ${token}`;
+            response = await fetch(`${BASE_URL}${url}`, { ...options, headers, _retry: true });
+        } catch {
+            localStorage.removeItem('access_token');
+            localStorage.removeItem('refresh_token');
+            localStorage.removeItem('user');
+            window.location.href = '/login';
+            throw new Error('Session expired');
         }
     }
 
@@ -40,7 +65,6 @@ async function request(url, options = {}) {
     }
 
     const data = await response.json();
-    // Unwrap API envelope { status_code, message, data } and wrap in { data } to match axios shape
     if (data && typeof data === 'object' && 'status_code' in data && 'data' in data) {
         return { data: data.data };
     }

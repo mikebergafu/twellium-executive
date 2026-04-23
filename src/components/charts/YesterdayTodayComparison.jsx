@@ -59,20 +59,19 @@ const YesterdayTodayComparison = () => {
             ? `${diff > 0 ? '+' : ''}${diff.toFixed(1)}%`
             : (yesterdayVal === 0 ? '—' : `${Math.abs(((todayVal - yesterdayVal) / yesterdayVal) * 100).toFixed(1)}%`);
         return (
-            <div className="col">
-                <div className="rounded-3 p-3 h-100" style={{ background: bg, border: `1px solid ${diff === 0 ? '#e2e8f0' : good ? '#bbf7d0' : '#fecaca'}` }}>
-                    <div className="d-flex align-items-center mb-2">
-                        <i className={`ti ${icon} me-2`} style={{ fontSize: '1.1rem', color: '#64748b' }}></i>
-                        <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#475569' }}>{label}</span>
+            <div style={{ flex: '1 1 0', minWidth: 0 }}>
+                <div className="rounded-3 px-2 py-2 h-100" style={{ background: bg, border: `1px solid ${diff === 0 ? '#e2e8f0' : good ? '#bbf7d0' : '#fecaca'}` }}>
+                    <div className="d-flex align-items-center mb-1">
+                        <i className={`ti ${icon} me-1`} style={{ fontSize: '0.9rem', color: '#64748b' }}></i>
+                        <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#475569' }}>{label}</span>
                     </div>
-                    <div style={{ fontSize: '1.8rem', fontWeight: 800, color: '#0f172a', lineHeight: 1 }}>{fmt(todayVal)}</div>
+                    <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#0f172a', lineHeight: 1 }}>{fmt(todayVal)}</div>
                     {!hideComparison && (
-                        <div className="d-flex align-items-center mt-2 gap-2">
-                            <span className="d-inline-flex align-items-center gap-1 rounded-pill px-2 py-1" style={{ background: '#fff', fontSize: '0.8rem', fontWeight: 700, color }}>
+                        <div className="d-flex align-items-center mt-1 gap-1">
+                            <span className="d-inline-flex align-items-center gap-1 rounded-pill px-1 py-0" style={{ background: '#fff', fontSize: '0.7rem', fontWeight: 700, color }}>
                                 <i className={`ti ${isUp ? 'ti-arrow-up' : diff < 0 ? 'ti-arrow-down' : 'ti-minus'}`}></i>
                                 {deltaLabel}
                             </span>
-                            <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>vs yesterday ({fmt(yesterdayVal)})</span>
                         </div>
                     )}
                 </div>
@@ -96,13 +95,10 @@ const YesterdayTodayComparison = () => {
                 </span>
             </div>
             <div className="card-body py-3">
-                <div className="row g-3 row-cols-2 row-cols-lg-4 mb-3">
+                <div className="d-flex flex-nowrap gap-2" style={{ overflowX: 'auto' }}>
                     <Metric label="Efficiency" icon="ti-gauge" todayVal={data.today.efficiency} yesterdayVal={data.yesterday.efficiency} />
-                    <Metric label="Output (Bottles)" icon="ti-bottle" todayVal={data.today.production} yesterdayVal={data.yesterday.production} unit="n" hideComparison />
+                    <Metric label="Output" icon="ti-bottle" todayVal={data.today.production} yesterdayVal={data.yesterday.production} unit="n" hideComparison />
                     <Metric label="Downtime" icon="ti-clock-pause" todayVal={data.today.downtime} yesterdayVal={data.yesterday.downtime} unit="n" invertColor hideComparison />
-                    <Metric label="Active Lines" icon="ti-topology-star-3" todayVal={data.today.lines} yesterdayVal={data.yesterday.lines} unit="n" />
-                </div>
-                <div className="row g-3 row-cols-3">
                     <Metric label="Availability" icon="ti-clock-check" todayVal={data.today.availability} yesterdayVal={data.yesterday.availability} />
                     <Metric label="Quality" icon="ti-rosette-discount-check" todayVal={data.today.quality} yesterdayVal={data.yesterday.quality} />
                     <Metric label="Performance" icon="ti-activity" todayVal={data.today.performance} yesterdayVal={data.yesterday.performance} />

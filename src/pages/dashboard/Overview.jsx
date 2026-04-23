@@ -120,6 +120,9 @@ const OeeGauge = ({ value, label, calculation, rawValues }) => {
 };
 
 /* ── component ───────────────────────────────────── */
+const ALL_PET_NAMES = ['Pet 1', 'Pet 2', 'Pet 3', 'Pet 4', 'Pet 5', 'Pet 6'];
+const normPet = (name) => { const num = name?.match(/(\d+)/)?.[0]; return num ? `Pet ${num}` : name; };
+
 const Overview = () => {
     const { getParams, filters } = useApiWithFilters();
     const [selectedPet, setSelectedPet] = useState('');
@@ -250,7 +253,7 @@ const Overview = () => {
                 // Build per-PET data from stoppages
                 const petMap = {};
                 stoppages.forEach(s => {
-                    const name = s.pet_name;
+                    const name = normPet(s.pet_name);
                     if (!petMap[name]) petMap[name] = { pet_name: name, bottles: 0, downtime: 0, efficiency: 0, count: 0 };
                     petMap[name].bottles += s.bottles_produced || 0;
                     petMap[name].downtime += s.downtime_minutes || 0;
@@ -269,7 +272,7 @@ const Overview = () => {
                         }
                     } catch {}
                     // Fallback to stoppages data
-                    const sp = petMap[r.pet_name];
+                    const sp = petMap[normPet(r.pet_name)];
                     if (sp) {
                         const avgEff = sp.count > 0 ? sp.efficiency / sp.count : 0;
                         const time = sp.count * 60;
@@ -1160,21 +1163,21 @@ const Overview = () => {
                         {sliderIndex === 1 && (() => {
                             const CO2=0.006,SYRUP=0.25,MAT=28,ELEC=2.5,WATER=1.8;
                             const petMap = {};
+                            ALL_PET_NAMES.forEach(n => { petMap[n] = { name: n, bottles: 0, runMins: 0 }; });
                             rawStoppages.forEach(r => {
-                                const n = r.pet_name; if (!n) return;
+                                const n = normPet(r.pet_name); if (!n) return;
                                 if (!petMap[n]) petMap[n] = { name: n, bottles: 0, runMins: 0 };
                                 petMap[n].bottles += r.bottles_produced || 0;
                                 petMap[n].runMins += 60 - (r.downtime_minutes || 0);
                             });
                             const pets = Object.values(petMap).sort((a,b) => parseInt(a.name?.match(/(\d+)/)?.[0]||'999') - parseInt(b.name?.match(/(\d+)/)?.[0]||'999'));
                             if (!pets.length) return <div className="text-center text-muted py-4">No data</div>;
+                            const isWater = (name) => /pet\s*5/i.test(name);
                             const stats = (p) => [
-                                {label:'Bottles',value:p.bottles.toLocaleString(),icon:'ti-bottle',color:'#1d4ed8'},
-                                {label:'CO₂',value:`${(p.bottles*CO2).toFixed(1)} kg`,icon:'ti-cloud',color:'#0ea5e9'},
-                                {label:'Syrup',value:`${(p.bottles*SYRUP/1000).toFixed(1)} L`,icon:'ti-droplet',color:'#8b5cf6'},
-                                {label:'Electricity',value:`${(p.runMins*ELEC).toFixed(0)} kWh`,icon:'ti-bolt',color:'#eab308'},
-                                {label:'Water',value:`${(p.bottles*WATER).toFixed(0)} L`,icon:'ti-droplets',color:'#06b6d4'},
-                            ];
+                                {label:'Bottles',value:p.bottles.toLocaleString(),icon:'ti-bottle',color:'#1d4ed8',raw:p.bottles},
+                                {label:'Electricity',value:`${(p.runMins*ELEC).toFixed(0)} kWh`,icon:'ti-bolt',color:'#eab308',raw:p.runMins*ELEC},
+                                {label:'Water',value:`${(p.bottles*WATER).toFixed(0)} L`,icon:'ti-droplets',color:'#06b6d4',raw:p.bottles*WATER},
+                            ].filter(s => s.raw > 0);
                             return (
                                 <div className="card mb-2">
                                     <div className="card-header py-2 d-flex align-items-center gap-2"><i className="ti ti-leaf text-success"></i><h6 className="mb-0 fw-bold">Resource Consumption</h6><span className="badge bg-soft-success text-success ms-1">{activeDateLabel}</span><span className="badge bg-soft-secondary text-secondary ms-1"><i className="ti ti-info-circle me-1"></i>Estimates</span></div>
@@ -1202,18 +1205,18 @@ const Overview = () => {
                         {sliderIndex === 3 && (() => {
                             const CO2=0.006,SYRUP=0.25,MAT=28,ELEC=2.5,WATER=1.8;
                             const petMap = {};
+                            ALL_PET_NAMES.forEach(n => { petMap[n] = { name: n, bottles: 0, runMins: 0 }; });
                             rawStoppages.forEach(r => {
-                                const n = r.pet_name; if (!n) return;
+                                const n = normPet(r.pet_name); if (!n) return;
                                 if (!petMap[n]) petMap[n] = { name: n, bottles: 0, runMins: 0 };
                                 petMap[n].bottles += r.bottles_produced || 0;
                                 petMap[n].runMins += 60 - (r.downtime_minutes || 0);
                             });
                             const pets = Object.values(petMap).sort((a,b) => parseInt(a.name?.match(/(\d+)/)?.[0]||'999') - parseInt(b.name?.match(/(\d+)/)?.[0]||'999'));
                             if (!pets.length) return <div className="text-center text-muted py-4">No data</div>;
-                            const materials = [
+                            const isWater = (name) => /pet\s*5/i.test(name);
+                            const allMaterials = [
                                 {label:'Bottles',unit:'',fn:p=>p.bottles,color:'#1d4ed8'},
-                                {label:'CO₂',unit:'kg',fn:p=>p.bottles*CO2,color:'#0ea5e9'},
-                                {label:'Syrup',unit:'L',fn:p=>p.bottles*SYRUP/1000,color:'#8b5cf6'},
                                 {label:'Electricity',unit:'kWh',fn:p=>p.runMins*ELEC,color:'#eab308'},
                                 {label:'Water',unit:'L',fn:p=>p.bottles*WATER,color:'#06b6d4'},
                             ];
@@ -1223,7 +1226,8 @@ const Overview = () => {
                                     <div className="card-body p-2">
                                         <div className="d-flex flex-nowrap justify-content-around gap-2" style={{overflowX:'auto'}}>
                                             {pets.map(p => {
-                                                const data = materials.map(m => ({name:m.label, value:parseFloat(m.fn(p).toFixed(2)), fill:m.color, unit:m.unit}));
+                                                const materials = allMaterials.filter(m => !(m.skipWater && isWater(p.name)));
+                                                const data = materials.map(m => ({name:m.label, value:parseFloat(m.fn(p).toFixed(2)), fill:m.color, unit:m.unit})).filter(d => d.value > 0);
                                                 return (
                                                     <div key={p.name} style={{flexShrink:0,display:'flex',flexDirection:'column',alignItems:'center'}}>
                                                         <div style={{fontSize:'0.72rem',fontWeight:700,color:'#1e293b',marginBottom:4}}>{p.name}</div>
@@ -1255,12 +1259,13 @@ const Overview = () => {
                         {sliderIndex === 4 && (() => {
                             const CO2=0.006, SYRUP=0.25;
                             const petMap = {};
+                            ALL_PET_NAMES.forEach(n => { petMap[n] = { name: n, bottles: 0 }; });
                             rawStoppages.forEach(r => {
-                                const n = r.pet_name; if (!n) return;
+                                const n = normPet(r.pet_name); if (!n) return;
                                 if (!petMap[n]) petMap[n] = { name: n, bottles: 0 };
                                 petMap[n].bottles += r.bottles_produced || 0;
                             });
-                            const pets = Object.values(petMap).sort((a,b) => parseInt(a.name?.match(/(\d+)/)?.[0]||'999') - parseInt(b.name?.match(/(\d+)/)?.[0]||'999'));
+                            const pets = Object.values(petMap).filter(p => !/pet\s*5/i.test(p.name)).sort((a,b) => parseInt(a.name?.match(/(\d+)/)?.[0]||'999') - parseInt(b.name?.match(/(\d+)/)?.[0]||'999'));
                             if (!pets.length) return <div className="text-center text-muted py-4">No data</div>;
                             const totalBottles = pets.reduce((s,p)=>s+p.bottles,0);
                             return (
@@ -1316,9 +1321,10 @@ const Overview = () => {
                         {sliderIndex === 5 && (() => {
                             const CO2=0.006, SYRUP=0.25;
                             const petMap = {};
+                            ALL_PET_NAMES.forEach(n => { petMap[n] = { name: n, bottles: 0, runMins: 0 }; });
                             hourlyOeeByLine.forEach(l => { if (l.name) petMap[l.name] = { name: l.name, bottles: 0, runMins: 0 }; });
                             rawStoppages.forEach(r => {
-                                const n = r.pet_name; if (!n) return;
+                                const n = normPet(r.pet_name); if (!n) return;
                                 if (!petMap[n]) petMap[n] = { name: n, bottles: 0, runMins: 0 };
                                 petMap[n].bottles += r.bottles_produced || 0;
                                 petMap[n].runMins += 60 - (r.downtime_minutes || 0);
@@ -1401,7 +1407,6 @@ const Overview = () => {
                 </div>
             ) : (
                 <>
-                <YesterdayTodayComparison />
 
             {/* ── Per-PET Stoppages Summary Table ── */}
             {(() => {
@@ -1460,21 +1465,21 @@ const Overview = () => {
             {(() => {
                 const CO2=0.006,SYRUP=0.25,MAT=28,ELEC=2.5,WATER=1.8;
                 const petMap = {};
+                ALL_PET_NAMES.forEach(n => { petMap[n] = { name: n, bottles: 0, runMins: 0 }; });
                 rawStoppages.forEach(r => {
-                    const n = r.pet_name; if (!n) return;
+                    const n = normPet(r.pet_name); if (!n) return;
                     if (!petMap[n]) petMap[n] = { name: n, bottles: 0, runMins: 0 };
                     petMap[n].bottles += r.bottles_produced || 0;
                     petMap[n].runMins += 60 - (r.downtime_minutes || 0);
                 });
                 const pets = Object.values(petMap).sort((a,b) => parseInt(a.name?.match(/(\d+)/)?.[0]||'999') - parseInt(b.name?.match(/(\d+)/)?.[0]||'999'));
                 if (!pets.length) return null;
+                const isWater = (name) => /pet\s*5/i.test(name);
                 const stats = (p) => [
-                    {label:'Bottles',value:p.bottles.toLocaleString(),icon:'ti-bottle',color:'#1d4ed8'},
-                    {label:'CO₂',value:`${(p.bottles*CO2).toFixed(1)} kg`,icon:'ti-cloud',color:'#0ea5e9'},
-                    {label:'Syrup',value:`${(p.bottles*SYRUP/1000).toFixed(1)} L`,icon:'ti-droplet',color:'#8b5cf6'},
-                    {label:'Electricity',value:`${(p.runMins*ELEC).toFixed(0)} kWh`,icon:'ti-bolt',color:'#eab308'},
-                    {label:'Water',value:`${(p.bottles*WATER).toFixed(0)} L`,icon:'ti-droplets',color:'#06b6d4'},
-                ];
+                    {label:'Bottles',value:p.bottles.toLocaleString(),icon:'ti-bottle',color:'#1d4ed8',raw:p.bottles},
+                    {label:'Electricity',value:`${(p.runMins*ELEC).toFixed(0)} kWh`,icon:'ti-bolt',color:'#eab308',raw:p.runMins*ELEC},
+                    {label:'Water',value:`${(p.bottles*WATER).toFixed(0)} L`,icon:'ti-droplets',color:'#06b6d4',raw:p.bottles*WATER},
+                ].filter(s => s.raw > 0);
                 return (
                     <div className="card mb-2">
                         <div className="card-header py-2 d-flex align-items-center gap-2">
@@ -1509,18 +1514,18 @@ const Overview = () => {
             {(() => {
                 const CO2=0.006,SYRUP=0.25,MAT=28,ELEC=2.5,WATER=1.8;
                 const petMap = {};
+                ALL_PET_NAMES.forEach(n => { petMap[n] = { name: n, bottles: 0, runMins: 0 }; });
                 rawStoppages.forEach(r => {
-                    const n = r.pet_name; if (!n) return;
+                    const n = normPet(r.pet_name); if (!n) return;
                     if (!petMap[n]) petMap[n] = { name: n, bottles: 0, runMins: 0 };
                     petMap[n].bottles += r.bottles_produced || 0;
                     petMap[n].runMins += 60 - (r.downtime_minutes || 0);
                 });
                 const pets = Object.values(petMap).sort((a,b) => parseInt(a.name?.match(/(\d+)/)?.[0]||'999') - parseInt(b.name?.match(/(\d+)/)?.[0]||'999'));
                 if (!pets.length) return null;
-                const materials = [
+                const isWater2 = (name) => /pet\s*5/i.test(name);
+                const allMaterials = [
                     {label:'Bottles',unit:'',fn:p=>p.bottles,color:'#1d4ed8'},
-                    {label:'CO₂',unit:'kg',fn:p=>p.bottles*CO2,color:'#0ea5e9'},
-                    {label:'Syrup',unit:'L',fn:p=>p.bottles*SYRUP/1000,color:'#8b5cf6'},
                     {label:'Electricity',unit:'kWh',fn:p=>p.runMins*ELEC,color:'#eab308'},
                     {label:'Water',unit:'L',fn:p=>p.bottles*WATER,color:'#06b6d4'},
                 ];
@@ -1534,7 +1539,8 @@ const Overview = () => {
                         <div className="card-body p-2">
                             <div className="d-flex flex-nowrap justify-content-around gap-2" style={{overflowX:'auto'}}>
                                 {pets.map(p => {
-                                    const data = materials.map(m => ({name:m.label, value:parseFloat(m.fn(p).toFixed(2)), fill:m.color, unit:m.unit}));
+                                    const materials = allMaterials.filter(m => !(m.skipWater && isWater2(p.name)));
+                                    const data = materials.map(m => ({name:m.label, value:parseFloat(m.fn(p).toFixed(2)), fill:m.color, unit:m.unit})).filter(d => d.value > 0);
                                     return (
                                         <div key={p.name} style={{flexShrink:0,display:'flex',flexDirection:'column',alignItems:'center'}}>
                                             <div style={{fontSize:'0.72rem',fontWeight:700,color:'#1e293b',marginBottom:4}}>{p.name}</div>
@@ -1567,12 +1573,12 @@ const Overview = () => {
             {/* ── Material Consumptions ──────────── */}
             {(() => {
                 const rows = rawReports.filter(r => r.co2_readings || r.syrup_readings || r.production_readings);
-                if (!hourlyOeeByLine.length) return null;
+                if (!rows.length) return null;
                 // Build per-PET data points — seed all known PETs first
                 const petMap = {};
-                hourlyOeeByLine.forEach(l => { if (l.name) petMap[l.name] = { pet: l.name, Shrink: 0, Syrup: 0, CO2: 0, Preforms: 0, ShrinkLoss: 0, SyrupLoss: 0, CO2Loss: 0, PreformsLoss: 0 }; });
+                ALL_PET_NAMES.forEach(n => { petMap[n] = { pet: n, Shrink: 0, Syrup: 0, CO2: 0, Preforms: 0, ShrinkLoss: 0, SyrupLoss: 0, CO2Loss: 0, PreformsLoss: 0 }; });
                 rows.forEach(r => {
-                    const n = r.pet_name; if (!n) return;
+                    const n = normPet(r.pet_name); if (!n) return;
                     if (!petMap[n]) petMap[n] = { pet: n, Shrink: 0, Syrup: 0, CO2: 0, Preforms: 0, ShrinkLoss: 0, SyrupLoss: 0, CO2Loss: 0, PreformsLoss: 0 };
                     petMap[n].Shrink    += parseFloat(r.production_readings?.shrink_reading || 0);
                     petMap[n].ShrinkLoss+= parseFloat(r.production_readings?.blower_rejects || 0);
@@ -1602,7 +1608,7 @@ const Overview = () => {
                             <div className="d-flex flex-nowrap justify-content-around" style={{overflowX:'auto'}}>
                                 {BARS.map((b, bi) => {
                                     const PET_COLORS=['#1d4ed8','#0ea5e9','#8b5cf6','#f59e0b','#16a34a','#dc2626','#06b6d4','#ec4899'];
-                                    const pieData = data.map((p,i) => ({name:p.pet, value:parseFloat((p[b.key]||0).toFixed(2)), fill:PET_COLORS[i%PET_COLORS.length]}));
+                                    const pieData = data.map((p,i) => ({name:p.pet, value:parseFloat((p[b.key]||0).toFixed(2)), fill:PET_COLORS[i%PET_COLORS.length]})).filter(d => d.value > 0);
                                     const total = pieData.reduce((s,d)=>s+d.value,0);
                                     
                                     // Calculate Yield
@@ -1682,7 +1688,7 @@ const Overview = () => {
                 const CO2=0.006, SYRUP=0.25;
                 const petMap = {};
                 rawStoppages.forEach(r => {
-                    const n = r.pet_name; if (!n) return;
+                    const n = normPet(r.pet_name); if (!n) return;
                     if (!petMap[n]) petMap[n] = { name: n, bottles: 0 };
                     petMap[n].bottles += r.bottles_produced || 0;
                 });
@@ -1746,7 +1752,7 @@ const Overview = () => {
                 const petMap = {};
                 hourlyOeeByLine.forEach(l => { if (l.name) petMap[l.name] = { name: l.name, bottles: 0, runMins: 0 }; });
                 rawStoppages.forEach(r => {
-                    const n = r.pet_name; if (!n) return;
+                    const n = normPet(r.pet_name); if (!n) return;
                     if (!petMap[n]) petMap[n] = { name: n, bottles: 0, runMins: 0 };
                     petMap[n].bottles += r.bottles_produced || 0;
                     petMap[n].runMins += 60 - (r.downtime_minutes || 0);
