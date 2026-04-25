@@ -982,47 +982,6 @@ const Overview = () => {
                                 </div>
                             );
                         })()}
-                        {sliderIndex === 1 && (() => {
-                            const ELEC=2.5,WATER=1.8;
-                            const petMap = {};
-                            ALL_PET_NAMES.forEach(n => { petMap[n] = { name: n, bottles: 0, runMins: 0 }; });
-                            rawStoppages.forEach(r => {
-                                const n = normPet(r.pet_name); if (!n) return;
-                                if (!petMap[n]) petMap[n] = { name: n, bottles: 0, runMins: 0 };
-                                petMap[n].bottles += r.bottles_produced || 0;
-                                petMap[n].runMins += 60 - (r.downtime_minutes || 0);
-                            });
-                            const pets = Object.values(petMap).sort((a,b) => parseInt(a.name?.match(/(\d+)/)?.[0]||'999') - parseInt(b.name?.match(/(\d+)/)?.[0]||'999'));
-                            if (!pets.length) return <div className="text-center text-muted py-4">No data</div>;
-                            const stats = (p) => [
-                                {label:'Bottles',value:p.bottles.toLocaleString(),icon:'ti-bottle',color:'#1d4ed8',raw:p.bottles},
-                                {label:'Electricity',value:`${(p.runMins*ELEC).toFixed(0)} kWh`,icon:'ti-bolt',color:'#eab308',raw:p.runMins*ELEC},
-                                {label:'Water',value:`${(p.bottles*WATER).toFixed(0)} L`,icon:'ti-droplets',color:'#06b6d4',raw:p.bottles*WATER},
-                            ].filter(s => s.raw > 0);
-                            return (
-                                <div className="card mb-2">
-                                    <div className="card-header py-2 d-flex align-items-center gap-2"><i className="ti ti-leaf text-success"></i><h6 className="mb-0 fw-bold">Resource Consumption</h6><span className="badge bg-soft-success text-success ms-1">{activeDateLabel}</span><span className="badge bg-soft-secondary text-secondary ms-1"><i className="ti ti-info-circle me-1"></i>Estimates</span></div>
-                                    <div className="card-body p-2">
-                                        <div className="d-flex gap-2">
-                                            {pets.map(p => (
-                                                <div key={p.name} style={{flex:1}}>
-                                                    <div className="rounded-3 p-2 h-100" style={{background:'#f8fafc',border:'1px solid #e2e8f0'}}>
-                                                        <div className="fw-bold mb-2" style={{fontSize:'0.8rem',color:'#1e293b'}}>{p.name}</div>
-                                                        {stats(p).map(s => (
-                                                            <div key={s.label} className="d-flex align-items-center gap-1 mb-1">
-                                                                <i className={`ti ${s.icon}`} style={{color:s.color,fontSize:'0.85rem',width:16}}></i>
-                                                                <span style={{fontSize:'0.7rem',color:'#64748b',flex:1}}>{s.label}</span>
-                                                                <span style={{fontSize:'0.75rem',fontWeight:700,color:'#0f172a'}}>{s.value}</span>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                </div>
-                            );
-                        })()}
                         {sliderIndex === 3 && (() => {
                             const ELEC=2.5,WATER=1.8;
                             const petMap = {};
@@ -1037,37 +996,28 @@ const Overview = () => {
                             if (!pets.length) return <div className="text-center text-muted py-4">No data</div>;
                             const isWater = (name) => /pet\s*5/i.test(name);
                             const allMaterials = [
-                                {label:'Bottles',unit:'',fn:p=>p.bottles,color:'#1d4ed8'},
                                 {label:'Electricity',unit:'kWh',fn:p=>p.runMins*ELEC,color:'#eab308'},
                                 {label:'Water',unit:'L',fn:p=>p.bottles*WATER,color:'#06b6d4'},
                             ];
                             return (
                                 <div className="card mb-2">
-                                    <div className="card-header py-2 d-flex align-items-center gap-2"><i className="ti ti-chart-donut text-primary"></i><h6 className="mb-0 fw-bold">Resource Consumption by PET</h6><span className="badge bg-soft-primary text-primary ms-1">{activeDateLabel}</span></div>
+                                    <div className="card-header py-2 d-flex align-items-center gap-2"><i className="ti ti-leaf text-primary"></i><h6 className="mb-0 fw-bold">Resource Consumption by PET</h6><span className="badge bg-soft-primary text-primary ms-1">{activeDateLabel}</span></div>
                                     <div className="card-body p-2">
                                         <div className="d-flex flex-nowrap justify-content-around gap-2" style={{overflowX:'auto'}}>
                                             {pets.map(p => {
                                                 const materials = allMaterials.filter(m => !(m.skipWater && isWater(p.name)));
                                                 const data = materials.map(m => ({name:m.label, value:parseFloat(m.fn(p).toFixed(2)), fill:m.color, unit:m.unit})).filter(d => d.value > 0);
                                                 return (
-                                                    <div key={p.name} style={{flexShrink:0,display:'flex',flexDirection:'column',alignItems:'center'}}>
-                                                        <div style={{fontSize:'0.72rem',fontWeight:700,color:'#1e293b',marginBottom:4}}>{p.name}</div>
-                                                        <div className="d-flex align-items-center gap-2">
-                                                            <div className="d-flex flex-column gap-1">
-                                                                {data.map(d => (
-                                                                    <div key={d.name} className="d-flex align-items-center gap-1">
-                                                                        <span style={{width:8,height:8,borderRadius:'50%',background:d.fill,flexShrink:0,display:'inline-block'}}></span>
-                                                                        <span style={{fontSize:'0.62rem',color:'#334155',fontWeight:600,whiteSpace:'nowrap'}}>{d.name}</span>
-                                                                        <span style={{fontSize:'0.62rem',color:'#64748b',whiteSpace:'nowrap'}}>{d.value.toLocaleString()}{d.unit?` ${d.unit}`:''}</span>
-                                                                    </div>
-                                                                ))}
-                                                            </div>
-                                                            <PieChart width={120} height={120}>
-                                                                <Pie data={data} cx={55} cy={55} innerRadius={28} outerRadius={50} dataKey="value" paddingAngle={2}>
-                                                                    {data.map((d,i) => <Cell key={i} fill={d.fill} />)}
-                                                                </Pie>
-                                                                <Tooltip formatter={(v,n,props) => [`${Number(v).toLocaleString()}${props.payload.unit?` ${props.payload.unit}`:''}`, n]} contentStyle={{fontSize:'0.7rem',padding:'2px 6px'}} />
-                                                            </PieChart>
+                                                    <div key={p.name} style={{flexShrink:0,minWidth:100}}>
+                                                        <div className="rounded-3 p-2 h-100" style={{background:'#f8fafc',border:'1px solid #e2e8f0'}}>
+                                                            <div style={{fontSize:'0.75rem',fontWeight:700,color:'#1e293b',marginBottom:6}}>{p.name}</div>
+                                                            {data.map(d => (
+                                                                <div key={d.name} className="d-flex align-items-center gap-1 mb-1">
+                                                                    <span style={{width:8,height:8,borderRadius:'50%',background:d.fill,flexShrink:0}}></span>
+                                                                    <span style={{fontSize:'0.7rem',color:'#64748b',flex:1}}>{d.name}</span>
+                                                                    <span style={{fontSize:'0.75rem',fontWeight:700,color:'#0f172a'}}>{d.value.toLocaleString()}{d.unit?` ${d.unit}`:''}</span>
+                                                                </div>
+                                                            ))}
                                                         </div>
                                                     </div>
                                                 );
@@ -1078,7 +1028,7 @@ const Overview = () => {
                             );
                         })()}
                         {sliderIndex === 4 && (() => {
-                            const CO2=0.006, SYRUP=0.25;
+                            const SYRUP=0.25;
                             const petMap = {};
                             ALL_PET_NAMES.forEach(n => { petMap[n] = { name: n, bottles: 0 }; });
                             rawStoppages.forEach(r => {
@@ -1086,51 +1036,28 @@ const Overview = () => {
                                 if (!petMap[n]) petMap[n] = { name: n, bottles: 0 };
                                 petMap[n].bottles += r.bottles_produced || 0;
                             });
-                            const pets = Object.values(petMap).filter(p => !/pet\s*5/i.test(p.name)).sort((a,b) => parseInt(a.name?.match(/(\d+)/)?.[0]||'999') - parseInt(b.name?.match(/(\d+)/)?.[0]||'999'));
+                            const pets = Object.values(petMap).sort((a,b) => parseInt(a.name?.match(/(\d+)/)?.[0]||'999') - parseInt(b.name?.match(/(\d+)/)?.[0]||'999'));
                             if (!pets.length) return <div className="text-center text-muted py-4">No data</div>;
                             const totalBottles = pets.reduce((s,p)=>s+p.bottles,0);
                             return (
                                 <div className="card mb-2">
-                                    <div className="card-header py-2 d-flex align-items-center gap-2">
-                                        <i className="ti ti-flask text-info"></i>
-                                        <h6 className="mb-0 fw-bold">CO₂ &amp; Syrup Yield</h6>
-                                        <span className="badge bg-soft-info text-info ms-1">{activeDateLabel}</span>
-                                        <span className="badge bg-soft-secondary text-secondary ms-auto">Total: {totalBottles.toLocaleString()} bottles</span>
-                                    </div>
+                                    <div className="card-header py-2 d-flex align-items-center gap-2"><i className="ti ti-droplet text-purple"></i><h6 className="mb-0 fw-bold">Syrup Yield</h6><span className="badge bg-soft-info text-info ms-1">{activeDateLabel}</span></div>
                                     <div className="card-body p-2">
-                                        <div className="d-flex gap-2">
+                                        <div className="d-flex flex-nowrap justify-content-around gap-2" style={{overflowX:'auto'}}>
                                             {pets.map(p => {
-                                                const co2 = (p.bottles * CO2).toFixed(1);
+                                                const pct = totalBottles > 0 ? (p.bottles / totalBottles) * 100 : 0;
                                                 const syrup = (p.bottles * SYRUP / 1000).toFixed(1);
-                                                const co2Pct = totalBottles > 0 ? ((p.bottles / totalBottles) * 100).toFixed(1) : 0;
-                                                const syrupPct = co2Pct; // same denominator (bottles)
+                                                const data = [{ name: 'Used', value: pct, fill: '#8b5cf6' }, { name: 'Rest', value: 100 - pct, fill: '#ede9fe' }];
                                                 return (
-                                                    <div key={p.name} style={{flex:1}}>
-                                                        <div className="rounded-3 p-2 h-100" style={{background:'#f0f9ff',border:'1px solid #bae6fd'}}>
-                                                            <div className="fw-bold mb-2" style={{fontSize:'0.8rem',color:'#0c4a6e'}}>{p.name}</div>
-                                                            <div className="mb-2">
-                                                                <div className="d-flex align-items-center gap-1 mb-1">
-                                                                    <i className="ti ti-cloud" style={{color:'#0ea5e9',fontSize:'0.85rem',width:16}}></i>
-                                                                    <span style={{fontSize:'0.7rem',color:'#64748b',flex:1}}>CO₂ Yield</span>
-                                                                    <span style={{fontSize:'0.8rem',fontWeight:800,color:'#0ea5e9'}}>{co2Pct}%</span>
-                                                                </div>
-                                                                <div style={{height:6,background:'#e0f2fe',borderRadius:3,overflow:'hidden'}}>
-                                                                    <div style={{width:`${co2Pct}%`,height:'100%',background:'#0ea5e9',borderRadius:3}} />
-                                                                </div>
-                                                                <div style={{fontSize:'0.65rem',color:'#94a3b8',textAlign:'right'}}>{co2} kg</div>
-                                                            </div>
-                                                            <div>
-                                                                <div className="d-flex align-items-center gap-1 mb-1">
-                                                                    <i className="ti ti-droplet" style={{color:'#8b5cf6',fontSize:'0.85rem',width:16}}></i>
-                                                                    <span style={{fontSize:'0.7rem',color:'#64748b',flex:1}}>Syrup Yield</span>
-                                                                    <span style={{fontSize:'0.8rem',fontWeight:800,color:'#8b5cf6'}}>{syrupPct}%</span>
-                                                                </div>
-                                                                <div style={{height:6,background:'#ede9fe',borderRadius:3,overflow:'hidden'}}>
-                                                                    <div style={{width:`${syrupPct}%`,height:'100%',background:'#8b5cf6',borderRadius:3}} />
-                                                                </div>
-                                                                <div style={{fontSize:'0.65rem',color:'#94a3b8',textAlign:'right'}}>{syrup} L</div>
-                                                            </div>
-                                                        </div>
+                                                    <div key={p.name} className="text-center" style={{flexShrink:0,minWidth:120}}>
+                                                        <div style={{fontSize:'0.75rem',fontWeight:700,color:'#1e293b',marginBottom:4}}>{p.name}</div>
+                                                        <PieChart width={110} height={110}>
+                                                            <Pie data={data} cx={50} cy={50} innerRadius={30} outerRadius={48} dataKey="value" startAngle={90} endAngle={-270}>
+                                                                {data.map((d,i) => <Cell key={i} fill={d.fill} />)}
+                                                            </Pie>
+                                                        </PieChart>
+                                                        <div style={{fontSize:'1rem',fontWeight:800,color:'#8b5cf6',marginTop:-8}}>{pct.toFixed(1)}%</div>
+                                                        <div style={{fontSize:'0.65rem',color:'#94a3b8'}}>{syrup} L</div>
                                                     </div>
                                                 );
                                             })}
@@ -1140,43 +1067,40 @@ const Overview = () => {
                             );
                         })()}
                         {sliderIndex === 5 && (() => {
-                            const CO2=0.006, SYRUP=0.25;
+                            const CO2=0.006;
                             const petMap = {};
-                            ALL_PET_NAMES.forEach(n => { petMap[n] = { name: n, bottles: 0, runMins: 0 }; });
-                            hourlyOeeByLine.forEach(l => { if (l.name) petMap[l.name] = { name: l.name, bottles: 0, runMins: 0 }; });
+                            ALL_PET_NAMES.forEach(n => { petMap[n] = { name: n, bottles: 0 }; });
                             rawStoppages.forEach(r => {
                                 const n = normPet(r.pet_name); if (!n) return;
-                                if (!petMap[n]) petMap[n] = { name: n, bottles: 0, runMins: 0 };
+                                if (!petMap[n]) petMap[n] = { name: n, bottles: 0 };
                                 petMap[n].bottles += r.bottles_produced || 0;
-                                petMap[n].runMins += 60 - (r.downtime_minutes || 0);
                             });
                             const pets = Object.values(petMap).sort((a,b) => parseInt(a.name?.match(/(\d+)/)?.[0]||'999') - parseInt(b.name?.match(/(\d+)/)?.[0]||'999'));
                             if (!pets.length) return <div className="text-center text-muted py-4">No data</div>;
-                            const co2Rates = pets.map(p => p.runMins > 0 ? (p.bottles*CO2)/p.runMins : 0);
-                            const syrupRates = pets.map(p => p.runMins > 0 ? (p.bottles*SYRUP/1000)/p.runMins : 0);
-                            const maxCO2 = Math.max(...co2Rates, 0.001);
-                            const maxSyrup = Math.max(...syrupRates, 0.001);
+                            const totalBottles = pets.reduce((s,p)=>s+p.bottles,0);
                             return (
                                 <div className="card mb-2">
-                                    <div className="card-header py-2 d-flex align-items-center gap-2">
-                                        <i className="ti ti-gauge text-info"></i><h6 className="mb-0 fw-bold">CO₂ vs Syrup Yield Comparison</h6>
-                                        <span className="badge bg-soft-info text-info ms-1">{activeDateLabel}</span>
-                                        <span className="d-flex align-items-center gap-2 ms-auto">
-                                            <span style={{fontSize:'0.7rem'}}><span style={{display:'inline-block',width:10,height:10,background:'#0ea5e9',borderRadius:2,marginRight:4}}></span>CO₂ (kg/min)</span>
-                                            <span style={{fontSize:'0.7rem'}}><span style={{display:'inline-block',width:10,height:10,background:'#8b5cf6',borderRadius:2,marginRight:4}}></span>Syrup (L/min)</span>
-                                        </span>
-                                    </div>
-                                    <div className="card-body py-2">
+                                    <div className="card-header py-2 d-flex align-items-center gap-2"><i className="ti ti-cloud text-info"></i><h6 className="mb-0 fw-bold">CO₂ Yield</h6><span className="badge bg-soft-info text-info ms-1">{activeDateLabel}</span></div>
+                                    <div className="card-body p-2">
                                         <div className="d-flex flex-nowrap justify-content-around gap-2" style={{overflowX:'auto'}}>
-                                            {pets.map((p,i) => (
-                                                <DualGauge key={p.name}
-                                                    co2Pct={(co2Rates[i]/maxCO2)*100}
-                                                    syrupPct={(syrupRates[i]/maxSyrup)*100}
-                                                    label={p.name} size={160}
-                                                />
-                                            ))}
+                                            {pets.map(p => {
+                                                const pct = totalBottles > 0 ? (p.bottles / totalBottles) * 100 : 0;
+                                                const co2 = (p.bottles * CO2).toFixed(1);
+                                                const data = [{ name: 'Used', value: pct, fill: '#0ea5e9' }, { name: 'Rest', value: 100 - pct, fill: '#e0f2fe' }];
+                                                return (
+                                                    <div key={p.name} className="text-center" style={{flexShrink:0,minWidth:120}}>
+                                                        <div style={{fontSize:'0.75rem',fontWeight:700,color:'#1e293b',marginBottom:4}}>{p.name}</div>
+                                                        <PieChart width={110} height={110}>
+                                                            <Pie data={data} cx={50} cy={50} innerRadius={30} outerRadius={48} dataKey="value" startAngle={90} endAngle={-270}>
+                                                                {data.map((d,i) => <Cell key={i} fill={d.fill} />)}
+                                                            </Pie>
+                                                        </PieChart>
+                                                        <div style={{fontSize:'1rem',fontWeight:800,color:'#0ea5e9',marginTop:-8}}>{pct.toFixed(1)}%</div>
+                                                        <div style={{fontSize:'0.65rem',color:'#94a3b8'}}>{co2} kg</div>
+                                                    </div>
+                                                );
+                                            })}
                                         </div>
-                                        <div className="text-center mt-1" style={{fontSize:'0.8rem',color:'#94a3b8'}}>Needles show CO₂ (blue) &amp; Syrup (purple) yield rate per run minute, normalized to best line = 100</div>
                                     </div>
                                 </div>
                             );
@@ -1283,53 +1207,6 @@ const Overview = () => {
                 );
             })()}
 
-            {/* ── Resources / Yield Stats Table ──── */}
-            {(() => {
-                const ELEC=2.5,WATER=1.8;
-                const petMap = {};
-                ALL_PET_NAMES.forEach(n => { petMap[n] = { name: n, bottles: 0, runMins: 0 }; });
-                rawStoppages.forEach(r => {
-                    const n = normPet(r.pet_name); if (!n) return;
-                    if (!petMap[n]) petMap[n] = { name: n, bottles: 0, runMins: 0 };
-                    petMap[n].bottles += r.bottles_produced || 0;
-                    petMap[n].runMins += 60 - (r.downtime_minutes || 0);
-                });
-                const pets = Object.values(petMap).sort((a,b) => parseInt(a.name?.match(/(\d+)/)?.[0]||'999') - parseInt(b.name?.match(/(\d+)/)?.[0]||'999'));
-                if (!pets.length) return null;
-                const stats = (p) => [
-                    {label:'Bottles',value:p.bottles.toLocaleString(),icon:'ti-bottle',color:'#1d4ed8',raw:p.bottles},
-                    {label:'Electricity',value:`${(p.runMins*ELEC).toFixed(0)} kWh`,icon:'ti-bolt',color:'#eab308',raw:p.runMins*ELEC},
-                    {label:'Water',value:`${(p.bottles*WATER).toFixed(0)} L`,icon:'ti-droplets',color:'#06b6d4',raw:p.bottles*WATER},
-                ].filter(s => s.raw > 0);
-                return (
-                    <div className="card mb-2">
-                        <div className="card-header py-2 d-flex align-items-center gap-2">
-                            <i className="ti ti-leaf text-success"></i>
-                            <h6 className="mb-0 fw-bold">Resource Consumption</h6>
-                            <span className="badge bg-soft-success text-success ms-1">{activeDateLabel}</span>
-                            <span className="badge bg-soft-secondary text-secondary ms-1"><i className="ti ti-info-circle me-1"></i>Estimates</span>
-                        </div>
-                        <div className="card-body p-2">
-                            <div className="d-flex gap-2">
-                                {pets.map(p => (
-                                    <div key={p.name} style={{flex:1}}>
-                                        <div className="rounded-3 p-2 h-100" style={{ background: '#f8fafc', border: '1px solid #e2e8f0' }}>
-                                            <div className="fw-bold mb-2" style={{ fontSize: '0.8rem', color: '#1e293b' }}>{p.name}</div>
-                                            {stats(p).map(s => (
-                                                <div key={s.label} className="d-flex align-items-center gap-1 mb-1">
-                                                    <i className={`ti ${s.icon}`} style={{ color: s.color, fontSize: '0.85rem', width: 16 }}></i>
-                                                    <span style={{ fontSize: '0.7rem', color: '#64748b', flex: 1 }}>{s.label}</span>
-                                                    <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#0f172a' }}>{s.value}</span>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    </div>
-                );
-            })()}
 
             {/* ── Resource Consumption by Material ── */}
             {(() => {
@@ -1346,7 +1223,6 @@ const Overview = () => {
                 if (!pets.length) return null;
                 const isWater2 = (name) => /pet\s*5/i.test(name);
                 const allMaterials = [
-                    {label:'Bottles',unit:'',fn:p=>p.bottles,color:'#1d4ed8'},
                     {label:'Electricity',unit:'kWh',fn:p=>p.runMins*ELEC,color:'#eab308'},
                     {label:'Water',unit:'L',fn:p=>p.bottles*WATER,color:'#06b6d4'},
                 ];
@@ -1363,24 +1239,16 @@ const Overview = () => {
                                     const materials = allMaterials.filter(m => !(m.skipWater && isWater2(p.name)));
                                     const data = materials.map(m => ({name:m.label, value:parseFloat(m.fn(p).toFixed(2)), fill:m.color, unit:m.unit})).filter(d => d.value > 0);
                                     return (
-                                        <div key={p.name} style={{flexShrink:0,display:'flex',flexDirection:'column',alignItems:'center'}}>
-                                            <div style={{fontSize:'0.72rem',fontWeight:700,color:'#1e293b',marginBottom:4}}>{p.name}</div>
-                                            <div className="d-flex align-items-center gap-2">
-                                                <div className="d-flex flex-column gap-1">
-                                                    {data.map(d => (
-                                                        <div key={d.name} className="d-flex align-items-center gap-1">
-                                                            <span style={{width:8,height:8,borderRadius:'50%',background:d.fill,flexShrink:0,display:'inline-block'}}></span>
-                                                            <span style={{fontSize:'0.62rem',color:'#334155',fontWeight:600,whiteSpace:'nowrap'}}>{d.name}</span>
-                                                            <span style={{fontSize:'0.62rem',color:'#64748b',whiteSpace:'nowrap'}}>{d.value.toLocaleString()}{d.unit?` ${d.unit}`:''}</span>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                                <PieChart width={120} height={120}>
-                                                    <Pie data={data} cx={55} cy={55} innerRadius={28} outerRadius={50} dataKey="value" paddingAngle={2}>
-                                                        {data.map((d,i) => <Cell key={i} fill={d.fill} />)}
-                                                    </Pie>
-                                                    <Tooltip formatter={(v,n,props) => [`${Number(v).toLocaleString()}${props.payload.unit?` ${props.payload.unit}`:''}`, n]} contentStyle={{fontSize:'0.7rem',padding:'2px 6px'}} />
-                                                </PieChart>
+                                        <div key={p.name} style={{flexShrink:0,minWidth:100}}>
+                                            <div className="rounded-3 p-2 h-100" style={{background:'#f8fafc',border:'1px solid #e2e8f0'}}>
+                                                <div style={{fontSize:'0.75rem',fontWeight:700,color:'#1e293b',marginBottom:6}}>{p.name}</div>
+                                                {data.map(d => (
+                                                    <div key={d.name} className="d-flex align-items-center gap-1 mb-1">
+                                                        <span style={{width:8,height:8,borderRadius:'50%',background:d.fill,flexShrink:0}}></span>
+                                                        <span style={{fontSize:'0.7rem',color:'#64748b',flex:1}}>{d.name}</span>
+                                                        <span style={{fontSize:'0.75rem',fontWeight:700,color:'#0f172a'}}>{d.value.toLocaleString()}{d.unit?` ${d.unit}`:''}</span>
+                                                    </div>
+                                                ))}
                                             </div>
                                         </div>
                                     );
@@ -1504,9 +1372,9 @@ const Overview = () => {
                 );
             })()}
 
-            {/* ── CO₂ & Syrup Yield ──────────────── */}
+            {/* ── Syrup Yield per Line ──────────── */}
             {(() => {
-                const CO2=0.006, SYRUP=0.25;
+                const SYRUP=0.25;
                 const petMap = {};
                 rawStoppages.forEach(r => {
                     const n = normPet(r.pet_name); if (!n) return;
@@ -1519,45 +1387,27 @@ const Overview = () => {
                 return (
                     <div className="card mb-2">
                         <div className="card-header py-2 d-flex align-items-center gap-2">
-                            <i className="ti ti-flask text-info"></i>
-                            <h6 className="mb-0 fw-bold">CO₂ &amp; Syrup Yield</h6>
+                            <i className="ti ti-droplet text-purple"></i>
+                            <h6 className="mb-0 fw-bold">Syrup Yield</h6>
                             <span className="badge bg-soft-info text-info ms-1">{activeDateLabel}</span>
-                            <span className="badge bg-soft-secondary text-secondary ms-auto">Total: {totalBottles.toLocaleString()} bottles</span>
                         </div>
                         <div className="card-body p-2">
-                            <div className="d-flex gap-2">
+                            <div className="d-flex flex-nowrap justify-content-around gap-2" style={{overflowX:'auto'}}>
                                 {pets.map(p => {
-                                    const co2 = (p.bottles * CO2).toFixed(1);
+                                    const pct = totalBottles > 0 ? (p.bottles / totalBottles) * 100 : 0;
                                     const syrup = (p.bottles * SYRUP / 1000).toFixed(1);
-                                    const co2Pct = totalBottles > 0 ? ((p.bottles / totalBottles) * 100).toFixed(1) : 0;
-                                    const syrupPct = co2Pct;
+                                    const color = pct >= 20 ? '#8b5cf6' : pct >= 10 ? '#a78bfa' : '#c4b5fd';
+                                    const data = [{ name: 'Used', value: pct, fill: '#8b5cf6' }, { name: 'Rest', value: 100 - pct, fill: '#ede9fe' }];
                                     return (
-                                        <div key={p.name} style={{flex:1}}>
-                                            <div className="rounded-3 p-2 h-100" style={{ background: '#f0f9ff', border: '1px solid #bae6fd' }}>
-                                                <div className="fw-bold mb-2" style={{ fontSize: '0.8rem', color: '#0c4a6e' }}>{p.name}</div>
-                                                <div className="mb-2">
-                                                    <div className="d-flex align-items-center gap-1 mb-1">
-                                                        <i className="ti ti-cloud" style={{ color: '#0ea5e9', fontSize: '0.85rem', width: 16 }}></i>
-                                                        <span style={{ fontSize: '0.7rem', color: '#64748b', flex: 1 }}>CO₂ Yield</span>
-                                                        <span style={{ fontSize: '0.8rem', fontWeight: 800, color: '#0ea5e9' }}>{co2Pct}%</span>
-                                                    </div>
-                                                    <div style={{ height: 6, background: '#e0f2fe', borderRadius: 3, overflow: 'hidden' }}>
-                                                        <div style={{ width: `${co2Pct}%`, height: '100%', background: '#0ea5e9', borderRadius: 3 }} />
-                                                    </div>
-                                                    <div style={{ fontSize: '0.65rem', color: '#94a3b8', textAlign: 'right' }}>{co2} kg</div>
-                                                </div>
-                                                <div>
-                                                    <div className="d-flex align-items-center gap-1 mb-1">
-                                                        <i className="ti ti-droplet" style={{ color: '#8b5cf6', fontSize: '0.85rem', width: 16 }}></i>
-                                                        <span style={{ fontSize: '0.7rem', color: '#64748b', flex: 1 }}>Syrup Yield</span>
-                                                        <span style={{ fontSize: '0.8rem', fontWeight: 800, color: '#8b5cf6' }}>{syrupPct}%</span>
-                                                    </div>
-                                                    <div style={{ height: 6, background: '#ede9fe', borderRadius: 3, overflow: 'hidden' }}>
-                                                        <div style={{ width: `${syrupPct}%`, height: '100%', background: '#8b5cf6', borderRadius: 3 }} />
-                                                    </div>
-                                                    <div style={{ fontSize: '0.65rem', color: '#94a3b8', textAlign: 'right' }}>{syrup} L</div>
-                                                </div>
-                                            </div>
+                                        <div key={p.name} className="text-center" style={{flexShrink:0,minWidth:120}}>
+                                            <div style={{fontSize:'0.75rem',fontWeight:700,color:'#1e293b',marginBottom:4}}>{p.name}</div>
+                                            <PieChart width={110} height={110}>
+                                                <Pie data={data} cx={50} cy={50} innerRadius={30} outerRadius={48} dataKey="value" startAngle={90} endAngle={-270}>
+                                                    {data.map((d,i) => <Cell key={i} fill={d.fill} />)}
+                                                </Pie>
+                                            </PieChart>
+                                            <div style={{fontSize:'1rem',fontWeight:800,color:'#8b5cf6',marginTop:-8}}>{pct.toFixed(1)}%</div>
+                                            <div style={{fontSize:'0.65rem',color:'#94a3b8'}}>{syrup} L</div>
                                         </div>
                                     );
                                 })}
@@ -1567,41 +1417,45 @@ const Overview = () => {
                 );
             })()}
 
-            {/* ── CO₂ vs Syrup Yield Comparison ───── */}
+            {/* ── CO₂ Yield per Line ─────────────── */}
             {(() => {
-                const CO2=0.006, SYRUP=0.25;
+                const CO2=0.006;
                 const petMap = {};
-                hourlyOeeByLine.forEach(l => { if (l.name) petMap[l.name] = { name: l.name, bottles: 0, runMins: 0 }; });
                 rawStoppages.forEach(r => {
                     const n = normPet(r.pet_name); if (!n) return;
-                    if (!petMap[n]) petMap[n] = { name: n, bottles: 0, runMins: 0 };
+                    if (!petMap[n]) petMap[n] = { name: n, bottles: 0 };
                     petMap[n].bottles += r.bottles_produced || 0;
-                    petMap[n].runMins += 60 - (r.downtime_minutes || 0);
                 });
                 const pets = Object.values(petMap).sort((a,b) => parseInt(a.name?.match(/(\d+)/)?.[0]||'999') - parseInt(b.name?.match(/(\d+)/)?.[0]||'999'));
                 if (!pets.length) return null;
-                const co2Rates = pets.map(p => p.runMins > 0 ? (p.bottles*CO2)/p.runMins : 0);
-                const syrupRates = pets.map(p => p.runMins > 0 ? (p.bottles*SYRUP/1000)/p.runMins : 0);
-                const maxCO2 = Math.max(...co2Rates, 0.001);
-                const maxSyrup = Math.max(...syrupRates, 0.001);
+                const totalBottles = pets.reduce((s,p)=>s+p.bottles,0);
                 return (
                     <div className="card mb-2">
                         <div className="card-header py-2 d-flex align-items-center gap-2">
-                            <i className="ti ti-gauge text-info"></i>
-                            <h6 className="mb-0 fw-bold">CO₂ vs Syrup Yield Comparison</h6>
+                            <i className="ti ti-cloud text-info"></i>
+                            <h6 className="mb-0 fw-bold">CO₂ Yield</h6>
                             <span className="badge bg-soft-info text-info ms-1">{activeDateLabel}</span>
                         </div>
                         <div className="card-body p-2">
                             <div className="d-flex flex-nowrap justify-content-around gap-2" style={{overflowX:'auto'}}>
-                                {pets.map((p,i) => (
-                                    <DualGauge key={p.name}
-                                        co2Pct={(co2Rates[i]/maxCO2)*100}
-                                        syrupPct={(syrupRates[i]/maxSyrup)*100}
-                                        label={p.name} size={160}
-                                    />
-                                ))}
+                                {pets.map(p => {
+                                    const pct = totalBottles > 0 ? (p.bottles / totalBottles) * 100 : 0;
+                                    const co2 = (p.bottles * CO2).toFixed(1);
+                                    const data = [{ name: 'Used', value: pct, fill: '#0ea5e9' }, { name: 'Rest', value: 100 - pct, fill: '#e0f2fe' }];
+                                    return (
+                                        <div key={p.name} className="text-center" style={{flexShrink:0,minWidth:120}}>
+                                            <div style={{fontSize:'0.75rem',fontWeight:700,color:'#1e293b',marginBottom:4}}>{p.name}</div>
+                                            <PieChart width={110} height={110}>
+                                                <Pie data={data} cx={50} cy={50} innerRadius={30} outerRadius={48} dataKey="value" startAngle={90} endAngle={-270}>
+                                                    {data.map((d,i) => <Cell key={i} fill={d.fill} />)}
+                                                </Pie>
+                                            </PieChart>
+                                            <div style={{fontSize:'1rem',fontWeight:800,color:'#0ea5e9',marginTop:-8}}>{pct.toFixed(1)}%</div>
+                                            <div style={{fontSize:'0.65rem',color:'#94a3b8'}}>{co2} kg</div>
+                                        </div>
+                                    );
+                                })}
                             </div>
-                            <div className="text-center mt-1" style={{fontSize:'0.8rem',color:'#94a3b8'}}>Needles show CO₂ (blue) &amp; Syrup (purple) yield rate per run minute, normalized to best line = 100</div>
                         </div>
                     </div>
                 );
