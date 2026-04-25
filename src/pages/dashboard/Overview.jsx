@@ -393,7 +393,7 @@ const Overview = () => {
     }, [loadShiftData]);
 
     /* Slider auto-advance */
-    const SLIDER_PANELS = 8;
+    const SLIDER_PANELS = 6;
     useEffect(() => {
         if (!sliderMode) { clearInterval(sliderTimerRef.current); return; }
         sliderTimerRef.current = setInterval(() => setSliderIndex(i => (i + 1) % SLIDER_PANELS), sliderSeconds * 1000);
@@ -982,7 +982,7 @@ const Overview = () => {
                                 </div>
                             );
                         })()}
-                        {sliderIndex === 3 && (() => {
+                        {sliderIndex === 1 && (() => {
                             const ELEC=2.5,WATER=1.8;
                             const petMap = {};
                             ALL_PET_NAMES.forEach(n => { petMap[n] = { name: n, bottles: 0, runMins: 0 }; });
@@ -1027,7 +1027,7 @@ const Overview = () => {
                                 </div>
                             );
                         })()}
-                        {sliderIndex === 4 && (() => {
+                        {sliderIndex === 2 && (() => {
                             const SYRUP=0.25;
                             const petMap = {};
                             ALL_PET_NAMES.forEach(n => { petMap[n] = { name: n, bottles: 0 }; });
@@ -1066,7 +1066,7 @@ const Overview = () => {
                                 </div>
                             );
                         })()}
-                        {sliderIndex === 5 && (() => {
+                        {sliderIndex === 3 && (() => {
                             const CO2=0.006;
                             const petMap = {};
                             ALL_PET_NAMES.forEach(n => { petMap[n] = { name: n, bottles: 0 }; });
@@ -1105,7 +1105,7 @@ const Overview = () => {
                                 </div>
                             );
                         })()}
-                        {sliderIndex === 6 && downtimeCategories.length > 0 && (() => {
+                        {sliderIndex === 4 && downtimeCategories.length > 0 && (() => {
                             const max = downtimeCategories[0]?.value || 1;
                             const total = downtimeCategories.reduce((s,c)=>s+c.value,0);
                             return (
@@ -1124,10 +1124,10 @@ const Overview = () => {
                                 </div>
                             );
                         })()}
-                        {sliderIndex === 6 && downtimeCategories.length === 0 && (
+                        {sliderIndex === 4 && downtimeCategories.length === 0 && (
                             <div className="card mb-2"><div className="card-body text-center text-muted py-4">No stoppage category data</div></div>
                         )}
-                        {sliderIndex === 7 && downtimeCategories.length > 0 && (() => {
+                        {sliderIndex === 5 && downtimeCategories.length > 0 && (() => {
                             const allSubs = downtimeCategories.flatMap(cat => cat.subs?.map(s=>({...s,catColor:cat.color,catName:cat.name}))||[]).sort((a,b)=>b.value-a.value);
                             const subMax = allSubs[0]?.value || 1;
                             return (
