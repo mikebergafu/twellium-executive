@@ -644,7 +644,6 @@ const Overview = () => {
         });
 
         return Object.values(lineMap).map(l => {
-            const stoppages = rawStoppages.filter(s => s.pet_name === l.name && (s.report_code || '').toUpperCase().includes(currentShiftInfo?.name?.toUpperCase())).length;
             const eff = l.reports > 0 ? l.efficiency / l.reports : 0;
             return {
                 name: l.name,
@@ -654,7 +653,7 @@ const Overview = () => {
                 perfRaw: { plannedTime: l.plannedTimeMins, totalDowntime: l.totalDowntime || l.downtime, plannedDowntime: l.plannedDowntime, mechDowntime: l.mechDowntime },
                 production: l.production,
                 downtime: l.downtime,
-                stoppageCount: stoppages,
+                stoppageCount: l.reports,
                 lastUpdated: null,
             };
         }).sort((a, b) => {
@@ -662,7 +661,7 @@ const Overview = () => {
             const bNum = parseInt(b.name?.match(/(\d+)/)?.[0] || '999');
             return aNum - bNum;
         });
-    }, [hourlyReports, rawPets, rawStoppages, currentShiftInfo, shiftOeeReports]);
+    }, [hourlyReports, rawPets, currentShiftInfo, shiftOeeReports]);
 
     const gaugeColor = (v) => v >= 85 ? '#22c55e' : v >= 60 ? '#f59e0b' : '#ef4444';
     const isLoading = initialLoading || refreshing;
