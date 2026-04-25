@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { PieChart, Pie, Cell, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer } from 'recharts';
+import { PieChart, Pie, Cell, Tooltip } from 'recharts';
 import { productionApi } from '../../api/production';
 import { useApiWithFilters } from '../../utils/useApiWithFilters';
 import { SkeletonGauges } from '../../components/ui/Skeletons';
@@ -125,8 +125,7 @@ const normPet = (name) => { const num = name?.match(/(\d+)/)?.[0]; return num ? 
 
 const Overview = () => {
     const { getParams, filters } = useApiWithFilters();
-    const [selectedPet, setSelectedPet] = useState('');
-    const [selectedDate, setSelectedDate] = useState('');
+    const [selectedPet] = useState('');
 
     // Independent OEE gauges date filter (defaults to previous day)
     const [oeeDate, setOeeDate] = useState(() => {
@@ -136,7 +135,6 @@ const Overview = () => {
     });
     const [oeeReports, setOeeReports] = useState([]);
     const [oeeLoading, setOeeLoading] = useState(false);
-    const [oeeShowDetail, setOeeShowDetail] = useState(false);
 
     /* Stale-while-revalidate: separate initial vs refresh state */
     const [initialLoading, setInitialLoading] = useState(true);
@@ -148,7 +146,6 @@ const Overview = () => {
     const [rawReports, setRawReports] = useState([]);
     const [rawPets, setRawPets] = useState([]);
     const [rawStoppages, setRawStoppages] = useState([]);
-    const [allReports, setAllReports] = useState([]);
     const [hourlyReports, setHourlyReports] = useState([]);
     const [shiftOeeReports, setShiftOeeReports] = useState([]);
     const [shifts, setShifts] = useState([]);
@@ -158,10 +155,7 @@ const Overview = () => {
     const [showReportsModal, setShowReportsModal] = useState(false);
     const [modalFilterPet, setModalFilterPet] = useState('');
     const [modalFilterDate, setModalFilterDate] = useState('');
-    const [shiftLoading, setShiftLoading] = useState(false);
     const [shiftFilterDate, setShiftFilterDate] = useState(() => new Date().toISOString().split('T')[0]);
-    const [shiftComparisonData, setShiftComparisonData] = useState({});
-    const [showShiftComparison, setShowShiftComparison] = useState(false);
     const [sliderMode, setSliderMode] = useState(() => localStorage.getItem('sliderMode') === 'true');
     const [sliderIndex, setSliderIndex] = useState(0);
     const [sliderSeconds, setSliderSeconds] = useState(() => Number(localStorage.getItem('sliderSeconds')) || 10);
@@ -224,7 +218,6 @@ const Overview = () => {
             setRawReports(sortByPet(reportsList));
             setRawPets((Array.isArray(petsRes.data) ? petsRes.data : []).filter(pet => !pet.pet_name?.toLowerCase().includes('can')));
             setRawStoppages((Array.isArray(stoppagesRes.data) ? stoppagesRes.data : []).filter(s => !(s.pet_name || s.line_name || '').toLowerCase().includes('can')));
-            setAllReports(sortByPet(reportsList));
 
             hasFetched.current = true;
         } catch (err) {
@@ -236,7 +229,7 @@ const Overview = () => {
                 setRefreshing(false);
             }
         }
-    }, [filters]);
+    }, [getParams]);
 
     // Fetch OEE data independently based on oeeDate
     useEffect(() => {
@@ -272,7 +265,6 @@ const Overview = () => {
     const loadShiftData = useCallback(async () => {
         if (!shifts.length) return;
 
-        setShiftLoading(true);
         try {
             const now = new Date();
             const currentTime = now.toTimeString().slice(0, 5);
@@ -304,7 +296,6 @@ const Overview = () => {
                 : (currentShift || shifts[0]);
 
             if (!targetShift) {
-                setShiftLoading(false);
                 return;
             }
 
@@ -320,25 +311,6 @@ const Overview = () => {
             });
 
             // Calculate shift date range based on shift times
-            const shiftStart = targetShift.start_time?.slice(0, 5);
-            const shiftEnd = targetShift.end_time?.slice(0, 5);
-            
-            let startDateTime, endDateTime;
-            
-            if (shiftStart && shiftEnd && shiftStart > shiftEnd) {
-                // Night shift: crosses midnight (e.g., 18:00 to 06:00)
-                // Start on refDateStr, end on next day
-                const startDate = new Date(refDateStr + 'T' + shiftStart + ':00Z');
-                const endDate = new Date(refDateStr + 'T' + shiftEnd + ':59Z');
-                endDate.setDate(endDate.getDate() + 1);
-                startDateTime = startDate.toISOString().replace(/\\.\\d{3}Z$/, 'Z');
-                endDateTime = endDate.toISOString().replace(/\\.\\d{3}Z$/, 'Z');
-            } else {
-                // Day shift: same day
-                startDateTime = `${refDateStr}T${shiftStart || '06:00'}:00Z`;
-                endDateTime = `${refDateStr}T${shiftEnd || '18:00'}:59Z`;
-            }
-
             const shiftParams = {
                 production_date: refDateStr
             };
@@ -371,17 +343,6 @@ const Overview = () => {
             const stoppagesArray = outerData.data || outerData.results || [];
             const shiftReports = stoppagesArray.filter(r => !r.pet_name?.toLowerCase().includes('can'));
             
-            const overallTotals = outerData.overall_totals || {};
-            const stoppagesSummary = {
-                total_production: overallTotals.bottles_produced || 0,
-                total_downtime: overallTotals.downtime_minutes || 0,
-                total_stoppages: outerData.count || 0,
-                avg_efficiency: parseFloat(overallTotals.efficiency) || 0,
-                downtime_breakdown: outerData.downtime_breakdown || {},
-                top_stoppage_reasons: outerData.top_stoppage_reasons || [],
-                shift_start_time: outerData.shift_start_time,
-                shift_end_time: outerData.shift_end_time,
-            };
 
             // Get the latest log_time from the reports
             const latestTime = shiftReports.reduce((latest, report) => {
@@ -414,21 +375,8 @@ const Overview = () => {
 
             setHourlyReports(sortByPet(shiftReports));
             
-            // Store comparison data for shift comparison feature
-            setShiftComparisonData(prev => ({
-                ...prev,
-                [`${refDateStr}_${targetShift.id}`]: {
-                    date: refDateStr,
-                    shift: targetShift,
-                    reports: shiftReports,
-                    summary: stoppagesSummary,
-                    timestamp: new Date().toISOString()
-                }
-            }));
         } catch (err) {
             console.error('Failed to load shift data:', err);
-        } finally {
-            setShiftLoading(false);
         }
     }, [shifts, selectedShiftId, shiftFilterDate, filters]);
 
@@ -452,13 +400,8 @@ const Overview = () => {
         return () => clearInterval(sliderTimerRef.current);
     }, [sliderMode, sliderSeconds]);
 
-    /* PETs available for the selected date (derived from reports) */
-    const availablePets = useMemo(() => {
-        return rawPets;
-    }, [rawPets]);
-
     /* ── Derived data (recomputed when filter or raw data changes) ── */
-    const { stats, oee, oeeByLine, oeeDetailReports, downtimeCategories } = useMemo(() => {
+    const { stats, oee, oeeByLine, downtimeCategories } = useMemo(() => {
         let reports = oeeReports.length > 0 ? oeeReports : rawReports;
         if (selectedPet) {
             reports = reports.filter(r => r.pet_name === selectedPet);
@@ -658,7 +601,7 @@ const Overview = () => {
         });
 
         return { stats, oee: displayOee, oeeByLine, oeeDetailReports, downtimeCategories };
-    }, [oeeReports, rawReports, rawPets, rawStoppages, selectedPet, selectedDate]);
+    }, [oeeReports, rawReports, rawStoppages, selectedPet]);
 
     /* Hourly OEE by Line for per-PET gauges */
     const hourlyOeeByLine = useMemo(() => {
@@ -719,7 +662,7 @@ const Overview = () => {
             const bNum = parseInt(b.name?.match(/(\d+)/)?.[0] || '999');
             return aNum - bNum;
         });
-    }, [hourlyReports, rawPets, rawStoppages, currentShiftInfo, shiftOeeReports, shiftFilterDate]);
+    }, [hourlyReports, rawPets, rawStoppages, currentShiftInfo, shiftOeeReports]);
 
     const gaugeColor = (v) => v >= 85 ? '#22c55e' : v >= 60 ? '#f59e0b' : '#ef4444';
     const isLoading = initialLoading || refreshing;
@@ -1041,7 +984,7 @@ const Overview = () => {
                             );
                         })()}
                         {sliderIndex === 1 && (() => {
-                            const CO2=0.006,SYRUP=0.25,MAT=28,ELEC=2.5,WATER=1.8;
+                            const ELEC=2.5,WATER=1.8;
                             const petMap = {};
                             ALL_PET_NAMES.forEach(n => { petMap[n] = { name: n, bottles: 0, runMins: 0 }; });
                             rawStoppages.forEach(r => {
@@ -1052,7 +995,6 @@ const Overview = () => {
                             });
                             const pets = Object.values(petMap).sort((a,b) => parseInt(a.name?.match(/(\d+)/)?.[0]||'999') - parseInt(b.name?.match(/(\d+)/)?.[0]||'999'));
                             if (!pets.length) return <div className="text-center text-muted py-4">No data</div>;
-                            const isWater = (name) => /pet\s*5/i.test(name);
                             const stats = (p) => [
                                 {label:'Bottles',value:p.bottles.toLocaleString(),icon:'ti-bottle',color:'#1d4ed8',raw:p.bottles},
                                 {label:'Electricity',value:`${(p.runMins*ELEC).toFixed(0)} kWh`,icon:'ti-bolt',color:'#eab308',raw:p.runMins*ELEC},
@@ -1083,7 +1025,7 @@ const Overview = () => {
                             );
                         })()}
                         {sliderIndex === 3 && (() => {
-                            const CO2=0.006,SYRUP=0.25,MAT=28,ELEC=2.5,WATER=1.8;
+                            const ELEC=2.5,WATER=1.8;
                             const petMap = {};
                             ALL_PET_NAMES.forEach(n => { petMap[n] = { name: n, bottles: 0, runMins: 0 }; });
                             rawStoppages.forEach(r => {
@@ -1344,7 +1286,7 @@ const Overview = () => {
 
             {/* ── Resources / Yield Stats Table ──── */}
             {(() => {
-                const CO2=0.006,SYRUP=0.25,MAT=28,ELEC=2.5,WATER=1.8;
+                const ELEC=2.5,WATER=1.8;
                 const petMap = {};
                 ALL_PET_NAMES.forEach(n => { petMap[n] = { name: n, bottles: 0, runMins: 0 }; });
                 rawStoppages.forEach(r => {
@@ -1355,7 +1297,6 @@ const Overview = () => {
                 });
                 const pets = Object.values(petMap).sort((a,b) => parseInt(a.name?.match(/(\d+)/)?.[0]||'999') - parseInt(b.name?.match(/(\d+)/)?.[0]||'999'));
                 if (!pets.length) return null;
-                const isWater = (name) => /pet\s*5/i.test(name);
                 const stats = (p) => [
                     {label:'Bottles',value:p.bottles.toLocaleString(),icon:'ti-bottle',color:'#1d4ed8',raw:p.bottles},
                     {label:'Electricity',value:`${(p.runMins*ELEC).toFixed(0)} kWh`,icon:'ti-bolt',color:'#eab308',raw:p.runMins*ELEC},
@@ -1393,7 +1334,7 @@ const Overview = () => {
 
             {/* ── Resource Consumption by Material ── */}
             {(() => {
-                const CO2=0.006,SYRUP=0.25,MAT=28,ELEC=2.5,WATER=1.8;
+                const ELEC=2.5,WATER=1.8;
                 const petMap = {};
                 ALL_PET_NAMES.forEach(n => { petMap[n] = { name: n, bottles: 0, runMins: 0 }; });
                 rawStoppages.forEach(r => {

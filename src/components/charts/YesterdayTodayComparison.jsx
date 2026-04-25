@@ -70,13 +70,13 @@ const YesterdayTodayComparison = () => {
         return { yesterday: agg(yesterdayData), today: todayAgg };
     }, [yesterdayData, todayData]);
 
-    const Metric = ({ label, sublabel, icon, todayVal, yesterdayVal, unit = '%', invertColor, hideComparison, hideTodayIfZero }) => {
+    const Metric = ({ label, sublabel, icon, todayVal, yesterdayVal, unit = '%', suffix = '', invertColor, hideComparison, hideTodayIfZero }) => {
         const diff = todayVal - yesterdayVal;
         const isUp = diff > 0;
         const good = invertColor ? !isUp : isUp;
         const color = diff === 0 ? '#64748b' : good ? '#16a34a' : '#dc2626';
         const bg = diff === 0 ? '#f1f5f9' : good ? '#f0fdf4' : '#fef2f2';
-        const fmt = (v) => unit === '%' ? v.toFixed(1) + '%' : v.toLocaleString();
+        const fmt = (v) => (unit === '%' ? v.toFixed(1) + '%' : v.toLocaleString()) + suffix;
         const deltaLabel = unit === '%'
             ? `${diff > 0 ? '+' : ''}${diff.toFixed(1)}%`
             : (yesterdayVal === 0 ? '—' : `${Math.abs(((todayVal - yesterdayVal) / yesterdayVal) * 100).toFixed(1)}%`);
@@ -132,7 +132,7 @@ const YesterdayTodayComparison = () => {
                 <div className="d-flex flex-nowrap gap-2" style={{ overflowX: 'auto' }}>
                     <Metric label="OEE" sublabel="Weighted Avg." icon="ti-gauge" todayVal={data.today.efficiency} yesterdayVal={data.yesterday.efficiency} />
                     <Metric label="Output" icon="ti-bottle" todayVal={data.today.production} yesterdayVal={data.yesterday.production} unit="n" hideComparison hideTodayIfZero />
-                    <Metric label="Downtime" icon="ti-clock-pause" todayVal={data.today.downtime} yesterdayVal={data.yesterday.downtime} unit="n" invertColor hideComparison />
+                    <Metric label="Downtime" icon="ti-clock-pause" todayVal={data.today.downtime} yesterdayVal={data.yesterday.downtime} unit="n" suffix=" min" invertColor hideComparison />
                     <Metric label="Availability" icon="ti-clock-check" todayVal={data.today.availability} yesterdayVal={data.yesterday.availability} />
                     <Metric label="Quality" icon="ti-rosette-discount-check" todayVal={data.today.quality} yesterdayVal={data.yesterday.quality} />
                     <Metric label="Performance" icon="ti-activity" todayVal={data.today.performance} yesterdayVal={data.yesterday.performance} />
