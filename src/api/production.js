@@ -7,4 +7,5 @@ export const productionApi = {
     getPets: (params) => api.get('/core/pets/', { params }),
     getReports: (params) => api.get('/production/reports/', { params }),
     getReportOeeMetrics: (id) => api.get(`/production/reports/${id}/oee_metrics/`),
+    getOeeSummary: (params) => api.get('/production/reports/oee_summary/', { params }),
 };

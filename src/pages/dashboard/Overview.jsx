@@ -193,23 +193,25 @@ const Overview = () => {
             setShifts(shiftsData);
             
             const [reportsRes, petsRes, stoppagesRes] = await Promise.all([
-                productionApi.getReports({ ...params, start_date: todayStr, end_date: todayStr, page_size: 1000 }),
+                productionApi.getOeeSummary({ production_date: todayStr }),
                 productionApi.getPets(params),
                 productionApi.getStoppages(stoppageParams),
             ]);
 
             if (controller.signal.aborted) return;
 
-            const reportsList = (Array.isArray(reportsRes.data) ? reportsRes.data : []).filter(r => !r.pet_name?.toLowerCase().includes('can'));
-
-            // Batch-fetch OEE metrics for each report
-            const reportsWithMetrics = await Promise.all(reportsList.map(async (r) => {
-                try {
-                    const m = await productionApi.getReportOeeMetrics(r.id);
-                    const md = m.data?.data || m.data || {};
-                    return { ...r, metrics: { availability: md.availability || 0, performance: md.efficiency || 0, quality: md.quality || 0, oee: md.oee || 0, details: md.details || {} } };
-                } catch { return { ...r, metrics: null }; }
-            }));
+            const reportsList = (Array.isArray(reportsRes.data) ? reportsRes.data : (reportsRes.data?.results || []))
+                .filter(r => !r.pet_name?.toLowerCase().includes('can'))
+                .map(r => ({
+                    ...r,
+                    metrics: {
+                        availability: parseFloat(r.metrics?.availability) || 0,
+                        performance: parseFloat(r.metrics?.efficiency) || 0,
+                        quality: parseFloat(r.metrics?.quality) || 0,
+                        oee: parseFloat(r.metrics?.oee) || 0,
+                        details: r.metrics?.details || {},
+                    }
+                }));
 
             if (controller.signal.aborted) return;
 
@@ -219,10 +221,10 @@ const Overview = () => {
                 return aNum - bNum;
             });
 
-            setRawReports(sortByPet(reportsWithMetrics));
+            setRawReports(sortByPet(reportsList));
             setRawPets((Array.isArray(petsRes.data) ? petsRes.data : []).filter(pet => !pet.pet_name?.toLowerCase().includes('can')));
             setRawStoppages((Array.isArray(stoppagesRes.data) ? stoppagesRes.data : []).filter(s => !(s.pet_name || s.line_name || '').toLowerCase().includes('can')));
-            setAllReports(sortByPet(reportsWithMetrics));
+            setAllReports(sortByPet(reportsList));
 
             hasFetched.current = true;
         } catch (err) {
@@ -242,56 +244,20 @@ const Overview = () => {
         const fetchOeeData = async () => {
             setOeeLoading(true);
             try {
-                // Fetch both reports (for OEE metrics) and stoppages (for real production data)
-                const [reportsRes, stoppagesRes] = await Promise.all([
-                    productionApi.getReports({ start_date: oeeDate, end_date: oeeDate, page_size: 1000 }),
-                    productionApi.getStoppages({ log_date: oeeDate, page_size: 1000 }),
-                ]);
-                const reports = (Array.isArray(reportsRes.data) ? reportsRes.data : []).filter(r => !r.pet_name?.toLowerCase().includes('can'));
-                const stoppages = (Array.isArray(stoppagesRes.data) ? stoppagesRes.data : []).filter(s => !(s.pet_name || '').toLowerCase().includes('can'));
-
-                // Build per-PET data from stoppages
-                const petMap = {};
-                stoppages.forEach(s => {
-                    const name = normPet(s.pet_name);
-                    if (!petMap[name]) petMap[name] = { pet_name: name, bottles: 0, downtime: 0, efficiency: 0, count: 0 };
-                    petMap[name].bottles += s.bottles_produced || 0;
-                    petMap[name].downtime += s.downtime_minutes || 0;
-                    petMap[name].efficiency += parseFloat(s.efficiency) || 0;
-                    petMap[name].count += 1;
-                });
-
-                // Merge: use report oee_metrics where available, fall back to stoppages
-                const merged = await Promise.all(reports.map(async (r) => {
-                    try {
-                        const m = await productionApi.getReportOeeMetrics(r.id);
-                        const md = m.data?.data || m.data || {};
-                        const hasData = md.availability > 0 || md.efficiency > 0 || (md.details?.total_output_pcs || 0) > 0;
-                        if (hasData) {
-                            return { ...r, metrics: { availability: md.availability || 0, performance: md.efficiency || 0, quality: md.quality || 0, oee: md.oee || 0, details: md.details || {} } };
-                        }
-                    } catch {}
-                    // Fallback to stoppages data
-                    const sp = petMap[normPet(r.pet_name)];
-                    if (sp) {
-                        const avgEff = sp.count > 0 ? sp.efficiency / sp.count : 0;
-                        const time = sp.count * 60;
-                        const perf = time > 0 ? ((time - sp.downtime) / time) * 100 : 0;
-                        return { ...r, metrics: { availability: avgEff, performance: perf, quality: 100, oee: (avgEff / 100) * (perf / 100) * 100, details: { total_output_pcs: sp.bottles, total_downtime_mins: sp.downtime, planned_time_mins: time, mechanical_downtime_mins: sp.downtime, planned_downtime_mins: 0, rejects_pcs: 0 } } };
+                const res = await productionApi.getOeeSummary({ production_date: oeeDate });
+                const rows = (Array.isArray(res.data) ? res.data : (res.data?.results || []))
+                    .filter(r => !r.pet_name?.toLowerCase().includes('can'));
+                // Map oee_summary keys into the metrics shape consumed downstream (efficiency → performance)
+                setOeeReports(rows.map(r => ({
+                    ...r,
+                    metrics: {
+                        availability: parseFloat(r.metrics?.availability) || 0,
+                        performance: parseFloat(r.metrics?.efficiency) || 0,
+                        quality: parseFloat(r.metrics?.quality) || 0,
+                        oee: parseFloat(r.metrics?.oee) || 0,
+                        details: r.metrics?.details || {},
                     }
-                    return { ...r, metrics: { availability: 0, performance: 0, quality: 100, oee: 0, details: {} } };
-                }));
-                // Add entries for PETs that have stoppages but no reports
-                const reportedPets = new Set(merged.map(r => r.pet_name));
-                Object.values(petMap).forEach(sp => {
-                    if (!reportedPets.has(sp.pet_name)) {
-                        const avgEff = sp.count > 0 ? sp.efficiency / sp.count : 0;
-                        const time = sp.count * 60;
-                        const perf = time > 0 ? ((time - sp.downtime) / time) * 100 : 0;
-                        merged.push({ pet_name: sp.pet_name, shift_name: '', report_code: '', metrics: { availability: avgEff, performance: perf, quality: 100, oee: (avgEff / 100) * (perf / 100) * 100, details: { total_output_pcs: sp.bottles, total_downtime_mins: sp.downtime, planned_time_mins: time, mechanical_downtime_mins: sp.downtime, planned_downtime_mins: 0, rejects_pcs: 0 } } });
-                    }
-                });
-                setOeeReports([...merged]);
+                })));
             } catch (e) {
                 console.error('Error fetching OEE data:', e);
                 setOeeReports([]);
@@ -374,9 +340,7 @@ const Overview = () => {
             }
 
             const shiftParams = {
-                start_datetime: startDateTime,
-                end_datetime: endDateTime,
-                shift: targetShift.id
+                production_date: refDateStr
             };
 
             // Include PET filter if selected
@@ -384,29 +348,23 @@ const Overview = () => {
                 shiftParams.pet = filters.pet;
             }
 
-            const [shiftReportsRes, shiftOeeRes] = await Promise.all([
+            const [shiftReportsRes, oeeSummaryRes] = await Promise.all([
                 productionApi.getStoppagesSummary(shiftParams),
-                productionApi.getReports({ start_date: refDateStr, end_date: refDateStr, page_size: 1000 })
+                productionApi.getOeeSummary({ production_date: refDateStr })
             ]);
 
-            // Fetch OEE metrics for each report matching this shift
-            let shiftReportsList = (Array.isArray(shiftOeeRes.data) ? shiftOeeRes.data : []).filter(r => !r.pet_name?.toLowerCase().includes('can') && r.shift_name === targetShift.name);
+            // Use oee_summary data — array of per-line summaries
+            const oeeSummaryRaw = Array.isArray(oeeSummaryRes.data) ? oeeSummaryRes.data : (oeeSummaryRes.data?.results || []);
+            let oeeSummaryList = oeeSummaryRaw.filter(r => !r.pet_name?.toLowerCase().includes('can') && r.shift_name === targetShift.name);
 
-            // If current shift has no data and user didn't manually select, fall back to previous shift
-            if (shiftReportsList.length === 0 && !selectedShiftId && otherShift) {
-                shiftReportsList = (Array.isArray(shiftOeeRes.data) ? shiftOeeRes.data : []).filter(r => !r.pet_name?.toLowerCase().includes('can') && r.shift_name === otherShift.name);
-                if (shiftReportsList.length > 0) {
+            // If current shift has no data and user didn't manually select, fall back to other shift
+            if (oeeSummaryList.length === 0 && !selectedShiftId && otherShift) {
+                oeeSummaryList = oeeSummaryRaw.filter(r => !r.pet_name?.toLowerCase().includes('can') && r.shift_name === otherShift.name);
+                if (oeeSummaryList.length > 0) {
                     setCurrentShiftInfo(prev => ({ ...prev, id: otherShift.id, name: otherShift.name, start_time: otherShift.start_time, end_time: otherShift.end_time }));
                 }
             }
-            const oeeData = await Promise.all(shiftReportsList.map(async (r) => {
-                try {
-                    const m = await productionApi.getReportOeeMetrics(r.id);
-                    const md = m.data?.data || m.data || {};
-                    return { ...r, metrics: { availability: md.availability || 0, performance: md.efficiency || 0, quality: md.quality || 0, oee: md.oee || 0, details: md.details || {} } };
-                } catch { return { ...r, metrics: null }; }
-            }));
-            setShiftOeeReports(oeeData.filter(r => r.metrics));
+            setShiftOeeReports(oeeSummaryList);
             
             // Handle nested response: response.data is already unwrapped
             const outerData = shiftReportsRes?.data || {};
@@ -600,7 +558,7 @@ const Overview = () => {
                 reports: l.reports,
                 availability: clamp(l.availability / l.reports),
                 quality: clamp(l.quality / l.reports),
-                performance: clamp((l.plannedMins - l.plannedDowntimeMins) > 0 ? ((l.plannedMins - l.totalDowntimeMins) / (l.plannedMins - l.plannedDowntimeMins)) * 100 : 0),
+                performance: clamp(l.performance / l.reports),
                 oee: clamp(l.oee / l.reports),
                 production: l.production,
                 date: latest?.date || null,
@@ -689,7 +647,7 @@ const Overview = () => {
                 shift: r.shift_name || '-',
                 availability: clamp(r.metrics?.availability || 0),
                 quality: clamp(r.metrics?.quality || 0),
-                performance: clamp((() => { const pt = r.metrics?.details?.planned_time_mins || 0; const td = r.metrics?.details?.total_downtime_mins || 0; const pd = r.metrics?.details?.planned_downtime_mins || 0; const op = pt - pd; return op > 0 ? ((pt - td) / op) * 100 : 0; })()),
+                performance: clamp(r.metrics?.performance || 0),
                 oee: clamp(r.metrics?.oee || 0),
                 production: r.metrics?.details?.total_output_pcs || 0,
             };
@@ -704,135 +662,57 @@ const Overview = () => {
 
     /* Hourly OEE by Line for per-PET gauges */
     const hourlyOeeByLine = useMemo(() => {
-        // Compute shift duration in minutes from currentShiftInfo
-        let shiftMins = 0;
-        if (currentShiftInfo?.start_time && currentShiftInfo?.end_time) {
-            const [sh, sm] = currentShiftInfo.start_time.slice(0, 5).split(':').map(Number);
-            const [eh, em] = currentShiftInfo.end_time.slice(0, 5).split(':').map(Number);
-            shiftMins = (eh * 60 + em) - (sh * 60 + sm);
-            if (shiftMins <= 0) shiftMins += 24 * 60; // crosses midnight
-        }
-
-        // Build OEE metrics lookup from shiftOeeReports (has planned_time, downtime, planned_downtime)
-        const oeeByPet = {};
-        shiftOeeReports.forEach(r => {
-            const name = r.pet_name?.toLowerCase();
-            if (!name) return;
-            if (!oeeByPet[name]) oeeByPet[name] = { plannedTime: 0, totalDowntime: 0, plannedDowntime: 0, mechDowntime: 0 };
-            oeeByPet[name].plannedTime += r.metrics?.details?.planned_time_mins || 0;
-            oeeByPet[name].totalDowntime += r.metrics?.details?.total_downtime_mins || 0;
-            oeeByPet[name].plannedDowntime += r.metrics?.details?.planned_downtime_mins || 0;
-            oeeByPet[name].mechDowntime += r.metrics?.details?.mechanical_downtime_mins || 0;
-        });
-
+        // Build line map from oee_summary data (shiftOeeReports)
         const lineMap = {};
-        
-        // Start with all available PETs from rawPets
+
+        // Seed with all known PETs
         rawPets.forEach(pet => {
-            lineMap[pet.pet_name] = { 
-                name: pet.pet_name, 
-                reports: 0, 
-                oee: 0, 
-                production: 0, 
-                downtime: 0,
-                plannedDowntime: 0,
-                plannedTimeMins: 0,
-                efficiency: 0
-            };
+            lineMap[pet.pet_name] = { name: pet.pet_name, reports: 0, efficiency: 0, production: 0, downtime: 0, plannedDowntime: 0, plannedTimeMins: 0, totalDowntime: 0, mechDowntime: 0 };
         });
-        
-        // Add data from hourly reports (from stoppages summary endpoint)
+
+        // Populate from oee_summary response (keys: metrics.availability, metrics.efficiency, metrics.quality, metrics.oee)
+        shiftOeeReports.forEach(r => {
+            const name = r.pet_name;
+            if (!name) return;
+            if (!lineMap[name]) lineMap[name] = { name, reports: 0, efficiency: 0, production: 0, downtime: 0, plannedDowntime: 0, plannedTimeMins: 0, totalDowntime: 0, mechDowntime: 0 };
+            const l = lineMap[name];
+            l.reports += 1;
+            l.efficiency += parseFloat(r.metrics?.efficiency) || 0;
+            l.production += r.total_bottles_produced || 0;
+            l.downtime += r.metrics?.details?.total_downtime_mins || 0;
+            l.plannedDowntime += r.metrics?.details?.planned_downtime_mins || 0;
+            l.plannedTimeMins += r.metrics?.details?.planned_time_mins || 0;
+            l.totalDowntime += r.metrics?.details?.total_downtime_mins || 0;
+            l.mechDowntime += r.metrics?.details?.mechanical_downtime_mins || 0;
+        });
+
+        // Supplement from hourlyReports (stoppages summary) for lines missing in oee_summary
         hourlyReports.forEach(r => {
             const name = r.pet_name;
-            // Create entry if it doesn't exist (for cases where rawPets is empty)
-            if (!lineMap[name]) {
-                lineMap[name] = { 
-                    name: name, 
-                    reports: 0, 
-                    oee: 0, 
-                    production: 0, 
-                    downtime: 0,
-                    plannedDowntime: 0,
-                    plannedTimeMins: 0,
-                    efficiency: 0
-                };
-            }
-            
-            if (lineMap[name]) {
-                lineMap[name].reports += 1;
-                // Use efficiency from API response (convert string to number), fallback to OEE from metrics
-                const efficiency = parseFloat(r.efficiency) || r.metrics?.oee || 0;
-                lineMap[name].oee += efficiency;
-                lineMap[name].production += r.bottles_produced || r.total_bottles_produced || r.metrics?.details?.total_output_pcs || 0;
-                lineMap[name].downtime += r.downtime_minutes || r.metrics?.details?.total_downtime_mins || 0;
-                lineMap[name].plannedDowntime += r.planned_downtime_minutes || r.metrics?.details?.planned_downtime_mins || 0;
-                lineMap[name].plannedTimeMins += r.metrics?.details?.planned_time_mins || 0;
-                
-                // Track last updated time
-                if (r.log_time) {
-                    const time = new Date(r.log_date + 'T' + r.log_time);
-                    if (!lineMap[name].lastUpdated || time > lineMap[name].lastUpdated) {
-                        lineMap[name].lastUpdated = time;
-                    }
-                }
-            }
-        });
-
-        // Also populate from reports data (shiftOeeReports) for production/downtime when stoppages summary is empty
-        shiftOeeReports.forEach(r => {
-            const name = r.pet_name;
             if (!name) return;
-            if (!lineMap[name]) {
-                lineMap[name] = { name, reports: 0, oee: 0, production: 0, downtime: 0, plannedDowntime: 0, plannedTimeMins: 0, efficiency: 0 };
-            }
+            if (!lineMap[name]) lineMap[name] = { name, reports: 0, efficiency: 0, production: 0, downtime: 0, plannedDowntime: 0, plannedTimeMins: 0, totalDowntime: 0, mechDowntime: 0 };
             const l = lineMap[name];
             if (l.reports === 0) {
-                // Only fill from reports if stoppages didn't provide data
                 l.reports = 1;
-                l.production = r.total_bottles_produced || r.metrics?.details?.total_output_pcs || 0;
-                l.downtime = r.total_downtime_minutes || r.metrics?.details?.total_downtime_mins || 0;
-                l.plannedDowntime = r.metrics?.details?.planned_downtime_mins || 0;
-                l.plannedTimeMins = r.metrics?.details?.planned_time_mins || 0;
-                l.oee = r.metrics?.oee || 0;
+                l.efficiency = parseFloat(r.efficiency) || 0;
+                l.production = r.bottles_produced || 0;
+                l.downtime = r.downtime_minutes || 0;
             }
         });
 
-        // Compute elapsed time since shift start
-        let elapsedMins = shiftMins;
-        if (currentShiftInfo?.start_time && shiftFilterDate) {
-            const start = new Date(`${shiftFilterDate}T${currentShiftInfo.start_time.slice(0,5)}:00`);
-            const now = new Date();
-            const elapsed = Math.round((now - start) / 60000);
-            if (elapsed > 0 && elapsed < shiftMins) elapsedMins = elapsed;
-        }
-
         return Object.values(lineMap).map(l => {
-            // Performance uses elapsed time instead of full planned time
-            const oee = oeeByPet[l.name?.toLowerCase()];
             const stoppages = rawStoppages.filter(s => s.pet_name === l.name && (s.report_code || '').toUpperCase().includes(currentShiftInfo?.name?.toUpperCase())).length;
-            const actualTime = stoppages * 60;
-            const totalDT = oee?.totalDowntime > 0 ? oee.totalDowntime : l.downtime;
-            const plannedDT = oee?.plannedDowntime > 0 ? oee.plannedDowntime : l.plannedDowntime;
-            const operationalTime = actualTime - plannedDT;
-            const perf = operationalTime > 0 ? ((actualTime - totalDT) / operationalTime) * 100 : 0;
-            const plannedTime = oee?.plannedTime > 0 ? oee.plannedTime : (l.plannedTimeMins > 0 ? l.plannedTimeMins : shiftMins * l.reports);
+            const eff = l.reports > 0 ? l.efficiency / l.reports : 0;
             return {
-            name: l.name,
-            reports: l.reports,
-            oee: l.reports > 0 ? clamp(l.oee / l.reports) : 0,
-            performance: clamp(perf),
-            perfRaw: { plannedTime, totalDowntime: totalDT, plannedDowntime: plannedDT, mechDowntime: oee?.mechDowntime || 0 },
-            production: l.production,
-            downtime: l.downtime,
-            stoppageCount: rawStoppages.filter(s => s.pet_name === l.name && (s.report_code || '').toUpperCase().includes(currentShiftInfo?.name?.toUpperCase())).length,
-            lastUpdated: l.lastUpdated ? l.lastUpdated.toLocaleString('en-US', {
-                month: 'short',
-                day: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit',
-                second: '2-digit',
-                hour12: true
-            }) : null,
+                name: l.name,
+                reports: l.reports,
+                oee: clamp(eff),
+                performance: clamp(eff),
+                perfRaw: { plannedTime: l.plannedTimeMins, totalDowntime: l.totalDowntime || l.downtime, plannedDowntime: l.plannedDowntime, mechDowntime: l.mechDowntime },
+                production: l.production,
+                downtime: l.downtime,
+                stoppageCount: stoppages,
+                lastUpdated: null,
             };
         }).sort((a, b) => {
             const aNum = parseInt(a.name?.match(/(\d+)/)?.[0] || '999');
@@ -1407,6 +1287,7 @@ const Overview = () => {
                 </div>
             ) : (
                 <>
+
 
             {/* ── Per-PET Stoppages Summary Table ── */}
             {(() => {

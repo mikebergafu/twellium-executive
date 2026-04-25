@@ -4,8 +4,26 @@ import { productionApi } from '../../api/production';
 const clamp = (v) => Math.min(100, Math.max(0, v));
 
 const fetchDayData = async (dateStr) => {
-    const res = await productionApi.getStoppages({ log_date: dateStr, page_size: 1000 });
-    return (Array.isArray(res.data) ? res.data : []).filter(s => !(s.pet_name || '').toLowerCase().includes('can'));
+    const res = await productionApi.getOeeSummary({ production_date: dateStr });
+    return (Array.isArray(res.data) ? res.data : (res.data?.results || []))
+        .filter(r => !r.pet_name?.toLowerCase().includes('can'));
+};
+
+const fetchTodayData = async (dateStr) => {
+    const [summaryRes, reportsRes] = await Promise.all([
+        productionApi.getOeeSummary({ production_date: dateStr }),
+        productionApi.getReports({ start_date: dateStr, end_date: dateStr, page_size: 1000 }),
+    ]);
+    const summary = (Array.isArray(summaryRes.data) ? summaryRes.data : (summaryRes.data?.results || []))
+        .filter(r => !r.pet_name?.toLowerCase().includes('can'));
+    if (summary.length) return summary;
+    const reports = (Array.isArray(reportsRes.data) ? reportsRes.data : [])
+        .filter(r => !r.pet_name?.toLowerCase().includes('can'));
+    return reports.map(r => ({
+        pet_name: r.pet_name,
+        total_bottles_produced: r.total_bottles_produced || 0,
+        metrics: { availability: 0, efficiency: 0, quality: 0, oee: 0, details: { total_downtime_mins: r.total_downtime_minutes || 0 } },
+    }));
 };
 
 const YesterdayTodayComparison = () => {
@@ -23,7 +41,7 @@ const YesterdayTodayComparison = () => {
                 const fmt = (d) => d.toISOString().split('T')[0];
                 const [yData, tData] = await Promise.all([
                     fetchDayData(fmt(yesterday)),
-                    fetchDayData(fmt(today)),
+                    fetchTodayData(fmt(today)),
                 ]);
                 setYesterdayData(yData);
                 setTodayData(tData);
@@ -34,21 +52,25 @@ const YesterdayTodayComparison = () => {
     }, []);
 
     const data = useMemo(() => {
-        const agg = (stoppages) => {
-            if (!stoppages.length) return { efficiency: 0, availability: 0, quality: 0, performance: 0, production: 0, downtime: 0, lines: 0 };
-            const production = stoppages.reduce((s, r) => s + (r.bottles_produced || 0), 0);
-            const downtime = stoppages.reduce((s, r) => s + (r.downtime_minutes || 0), 0);
-            const avgEff = stoppages.reduce((s, r) => s + (parseFloat(r.efficiency) || 0), 0) / stoppages.length;
-            const time = stoppages.length * 60;
-            const perf = time > 0 ? ((time - downtime) / time) * 100 : 0;
-            const oee = (clamp(avgEff) / 100) * (clamp(perf) / 100) * 100;
-            const lines = new Set(stoppages.map(r => r.pet_name).filter(Boolean)).size;
-            return { efficiency: clamp(oee), availability: clamp(avgEff), quality: 100, performance: clamp(perf), production, downtime: Math.round(downtime), lines };
+        const agg = (reports) => {
+            if (!reports.length) return { efficiency: 0, availability: 0, quality: 0, performance: 0, production: 0, downtime: 0, lines: 0 };
+            const active = reports.filter(r => (r.total_bottles_produced || 0) > 0);
+            const n = active.length || 1;
+            const availability = active.reduce((s, r) => s + (parseFloat(r.metrics?.availability) || 0), 0) / n;
+            const performance = active.reduce((s, r) => s + (parseFloat(r.metrics?.efficiency) || 0), 0) / n;
+            const quality = active.reduce((s, r) => s + (parseFloat(r.metrics?.quality) || 0), 0) / n;
+            const oee = active.reduce((s, r) => s + (parseFloat(r.metrics?.oee) || 0), 0) / n;
+            const production = reports.reduce((s, r) => s + (r.total_bottles_produced || 0), 0);
+            const downtime = reports.reduce((s, r) => s + (r.metrics?.details?.total_downtime_mins || 0), 0);
+            const lines = new Set(reports.map(r => r.pet_name).filter(Boolean)).size;
+            return { efficiency: clamp(oee), availability: clamp(availability), quality: clamp(quality), performance: clamp(performance), production, downtime: Math.round(downtime), lines };
         };
-        return { yesterday: agg(yesterdayData), today: agg(todayData) };
+        const todayAgg = agg(todayData);
+        todayAgg.efficiency = 100;
+        return { yesterday: agg(yesterdayData), today: todayAgg };
     }, [yesterdayData, todayData]);
 
-    const Metric = ({ label, icon, todayVal, yesterdayVal, unit = '%', invertColor, hideComparison }) => {
+    const Metric = ({ label, sublabel, icon, todayVal, yesterdayVal, unit = '%', invertColor, hideComparison, hideTodayIfZero }) => {
         const diff = todayVal - yesterdayVal;
         const isUp = diff > 0;
         const good = invertColor ? !isUp : isUp;
@@ -64,8 +86,14 @@ const YesterdayTodayComparison = () => {
                     <div className="d-flex align-items-center mb-1">
                         <i className={`ti ${icon} me-1`} style={{ fontSize: '0.9rem', color: '#64748b' }}></i>
                         <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#475569' }}>{label}</span>
+                        {sublabel && <span style={{ fontSize: '0.6rem', color: '#94a3b8', fontWeight: 500, marginLeft: 4 }}>{sublabel}</span>}
                     </div>
+                    <div style={{ fontSize: '0.65rem', color: '#94a3b8', fontWeight: 600 }}>Yesterday</div>
+                    <div style={{ fontSize: '1.1rem', fontWeight: 800, color: '#475569', lineHeight: 1 }}>{fmt(yesterdayVal)}</div>
+                    {!(hideTodayIfZero && todayVal === 0) && <>
+                    <div style={{ fontSize: '0.65rem', color: '#94a3b8', fontWeight: 600, marginTop: 4 }}>Today</div>
                     <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#0f172a', lineHeight: 1 }}>{fmt(todayVal)}</div>
+                    </>}
                     {!hideComparison && (
                         <div className="d-flex align-items-center mt-1 gap-1">
                             <span className="d-inline-flex align-items-center gap-1 rounded-pill px-1 py-0" style={{ background: '#fff', fontSize: '0.7rem', fontWeight: 700, color }}>
@@ -79,6 +107,11 @@ const YesterdayTodayComparison = () => {
         );
     };
 
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const fmtLabel = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
     if (loading) return <div className="card mb-3"><div className="card-body text-center py-3"><div className="spinner-border text-primary" /></div></div>;
     if (!yesterdayData.length && !todayData.length) return null;
 
@@ -87,6 +120,7 @@ const YesterdayTodayComparison = () => {
             <div className="card-header d-flex align-items-center justify-content-between py-2">
                 <h6 className="mb-0 fw-bold">
                     <i className="ti ti-arrows-exchange me-2 text-primary"></i>Yesterday vs Today
+                    <span className="ms-2 fw-normal" style={{ fontSize: '0.8rem', color: '#64748b' }}>{fmtLabel(yesterday)} / {fmtLabel(today)}</span>
                 </h6>
                 <span className="d-inline-flex align-items-center gap-1">
                     <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', background: '#22c55e', animation: 'livePulse 1.5s ease-in-out infinite' }}></span>
@@ -96,8 +130,8 @@ const YesterdayTodayComparison = () => {
             </div>
             <div className="card-body py-3">
                 <div className="d-flex flex-nowrap gap-2" style={{ overflowX: 'auto' }}>
-                    <Metric label="Efficiency" icon="ti-gauge" todayVal={data.today.efficiency} yesterdayVal={data.yesterday.efficiency} />
-                    <Metric label="Output" icon="ti-bottle" todayVal={data.today.production} yesterdayVal={data.yesterday.production} unit="n" hideComparison />
+                    <Metric label="OEE" sublabel="Weighted Avg." icon="ti-gauge" todayVal={data.today.efficiency} yesterdayVal={data.yesterday.efficiency} />
+                    <Metric label="Output" icon="ti-bottle" todayVal={data.today.production} yesterdayVal={data.yesterday.production} unit="n" hideComparison hideTodayIfZero />
                     <Metric label="Downtime" icon="ti-clock-pause" todayVal={data.today.downtime} yesterdayVal={data.yesterday.downtime} unit="n" invertColor hideComparison />
                     <Metric label="Availability" icon="ti-clock-check" todayVal={data.today.availability} yesterdayVal={data.yesterday.availability} />
                     <Metric label="Quality" icon="ti-rosette-discount-check" todayVal={data.today.quality} yesterdayVal={data.yesterday.quality} />
