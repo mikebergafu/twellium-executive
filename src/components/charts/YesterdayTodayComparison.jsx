@@ -9,23 +9,6 @@ const fetchDayData = async (dateStr) => {
         .filter(r => !r.pet_name?.toLowerCase().includes('can'));
 };
 
-const fetchTodayData = async (dateStr) => {
-    const [summaryRes, reportsRes] = await Promise.all([
-        productionApi.getOeeSummary({ production_date: dateStr }),
-        productionApi.getReports({ start_date: dateStr, end_date: dateStr, page_size: 1000 }),
-    ]);
-    const summary = (Array.isArray(summaryRes.data) ? summaryRes.data : (summaryRes.data?.results || []))
-        .filter(r => !r.pet_name?.toLowerCase().includes('can'));
-    if (summary.length) return summary;
-    const reports = (Array.isArray(reportsRes.data) ? reportsRes.data : [])
-        .filter(r => !r.pet_name?.toLowerCase().includes('can'));
-    return reports.map(r => ({
-        pet_name: r.pet_name,
-        total_bottles_produced: r.total_bottles_produced || 0,
-        metrics: { availability: 0, efficiency: 0, quality: 0, oee: 0, details: { total_downtime_mins: r.total_downtime_minutes || 0 } },
-    }));
-};
-
 const YesterdayTodayComparison = () => {
     const [yesterdayData, setYesterdayData] = useState([]);
     const [todayData, setTodayData] = useState([]);
@@ -41,7 +24,7 @@ const YesterdayTodayComparison = () => {
                 const fmt = (d) => d.toISOString().split('T')[0];
                 const [yData, tData] = await Promise.all([
                     fetchDayData(fmt(yesterday)),
-                    fetchTodayData(fmt(today)),
+                    fetchDayData(fmt(today)),
                 ]);
                 setYesterdayData(yData);
                 setTodayData(tData);
@@ -52,9 +35,9 @@ const YesterdayTodayComparison = () => {
     }, []);
 
     const data = useMemo(() => {
-        const agg = (reports) => {
+        const agg = (reports, includeAll = false) => {
             if (!reports.length) return { efficiency: 0, availability: 0, quality: 0, performance: 0, production: 0, downtime: 0, lines: 0 };
-            const active = reports.filter(r => (r.total_bottles_produced || 0) > 0);
+            const active = includeAll ? reports : reports.filter(r => (r.total_bottles_produced || 0) > 0);
             const n = active.length || 1;
             const availability = active.reduce((s, r) => s + (parseFloat(r.metrics?.availability) || 0), 0) / n;
             const performance = active.reduce((s, r) => s + (parseFloat(r.metrics?.efficiency) || 0), 0) / n;
@@ -65,8 +48,9 @@ const YesterdayTodayComparison = () => {
             const lines = new Set(reports.map(r => r.pet_name).filter(Boolean)).size;
             return { efficiency: clamp(oee), availability: clamp(availability), quality: clamp(quality), performance: clamp(performance), production, downtime: Math.round(downtime), lines };
         };
-        const todayAgg = agg(todayData);
-        todayAgg.efficiency = 100;
+        const todayAgg = agg(todayData, true);
+        todayAgg.quality = 100;
+        todayAgg.efficiency = clamp((todayAgg.availability + todayAgg.performance + todayAgg.quality) / 3);
         return { yesterday: agg(yesterdayData), today: todayAgg };
     }, [yesterdayData, todayData]);
 
