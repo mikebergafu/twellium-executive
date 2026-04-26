@@ -50,7 +50,7 @@ const YesterdayTodayComparison = () => {
         };
         const todayAgg = agg(todayData, true);
         todayAgg.quality = 100;
-        todayAgg.efficiency = clamp((todayAgg.availability + todayAgg.performance + todayAgg.quality) / 3);
+        todayAgg.efficiency = Math.floor((todayAgg.availability + todayAgg.performance + todayAgg.quality) / 3 * 100) / 100;
         return { yesterday: agg(yesterdayData), today: todayAgg };
     }, [yesterdayData, todayData]);
 
@@ -60,7 +60,7 @@ const YesterdayTodayComparison = () => {
         const good = invertColor ? !isUp : isUp;
         const color = diff === 0 ? '#64748b' : good ? '#16a34a' : '#dc2626';
         const bg = diff === 0 ? '#f1f5f9' : good ? '#f0fdf4' : '#fef2f2';
-        const fmt = (v) => (unit === '%' ? v.toFixed(1) + '%' : v.toLocaleString()) + suffix;
+        const fmt = (v) => (unit === '%' ? v.toFixed(2) + '%' : v.toLocaleString()) + suffix;
         const deltaLabel = unit === '%'
             ? `${diff > 0 ? '+' : ''}${diff.toFixed(1)}%`
             : (yesterdayVal === 0 ? '—' : `${Math.abs(((todayVal - yesterdayVal) / yesterdayVal) * 100).toFixed(1)}%`);
