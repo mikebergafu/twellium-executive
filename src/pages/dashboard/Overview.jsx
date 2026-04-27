@@ -886,8 +886,10 @@ const Overview = () => {
                     </ResponsiveContainer>
                     <div className="d-flex justify-content-around mt-1" style={{ fontSize: '0.68rem', color: '#64748b' }}>
                         {chartData.map(p => (
-                            <div key={p.name} className="text-center">
+                            <div key={p.name} className="text-center" style={{ minWidth: 60 }}>
+                                <div style={{ fontWeight: 700, color: '#1e293b', marginBottom: 2 }}>{p.name}</div>
                                 <div style={{ fontWeight: 700, color }}>{p.share}%</div>
+                                <div>{p.consumption} {unit}</div>
                                 <div>{p.bottles.toLocaleString()} btl</div>
                             </div>
                         ))}
@@ -1359,12 +1361,22 @@ const Overview = () => {
                                 return row;
                             });
                             const COLORS = { PREFORMS: '#f59e0b', CLOSURES: '#8b5cf6', LABELS: '#0ea5e9', SHRINK: '#ec4899', GLUE: '#16a34a' };
+                            const petYields = allPets.map(pet => {
+                                const vals = Object.values(byPet[pet] || {});
+                                const totalUsed = vals.reduce((s, v) => s + v.used, 0);
+                                const totalLosses = vals.reduce((s, v) => s + v.losses, 0);
+                                return { pet, yield: totalUsed > 0 ? (totalUsed - totalLosses) / totalUsed * 100 : 0 };
+                            });
+                            const bestPet = petYields.length ? [...petYields].sort((a, b) => b.yield - a.yield)[0] : null;
+                            const lowPet = petYields.length ? [...petYields].sort((a, b) => a.yield - b.yield)[0] : null;
                             return (
                                 <div className="card mb-2">
                                     <div className="card-header py-2 d-flex align-items-center gap-2 flex-wrap">
                                         <i className="ti ti-chart-bar text-info"></i>
                                         <h6 className="mb-0 fw-bold">Material Yield by PET</h6>
                                         <span className="badge bg-soft-info text-info ms-1">{materialDate}</span>
+                                        {bestPet && <span className="badge bg-soft-success text-success" style={{ fontSize: '0.65rem' }}>Best: {bestPet.pet} ({bestPet.yield.toFixed(1)}%)</span>}
+                                        {lowPet && <span className="badge bg-soft-danger text-danger" style={{ fontSize: '0.65rem' }}>Low: {lowPet.pet} ({lowPet.yield.toFixed(1)}%)</span>}
                                     </div>
                                     <div className="card-body p-2">
                                         <div style={{ width: '100%', height: 320 }}>
@@ -1610,6 +1622,14 @@ const Overview = () => {
                 });
 
                 const COLORS = { PREFORMS: '#f59e0b', CLOSURES: '#8b5cf6', LABELS: '#0ea5e9', SHRINK: '#ec4899', GLUE: '#16a34a' };
+                const petYields = allPets.map(pet => {
+                    const vals = Object.values(byPet[pet] || {});
+                    const totalUsed = vals.reduce((s, v) => s + v.used, 0);
+                    const totalLosses = vals.reduce((s, v) => s + v.losses, 0);
+                    return { pet, yield: totalUsed > 0 ? (totalUsed - totalLosses) / totalUsed * 100 : 0 };
+                });
+                const bestPet = petYields.length ? [...petYields].sort((a, b) => b.yield - a.yield)[0] : null;
+                const lowPet = petYields.length ? [...petYields].sort((a, b) => a.yield - b.yield)[0] : null;
 
                 return (
                     <div className="card mb-2">
@@ -1617,6 +1637,8 @@ const Overview = () => {
                             <i className="ti ti-chart-bar text-info"></i>
                             <h6 className="mb-0 fw-bold">Material Yield by PET</h6>
                             <span className="badge bg-soft-info text-info ms-1">{materialDate}</span>
+                            {bestPet && <span className="badge bg-soft-success text-success" style={{ fontSize: '0.65rem' }}>Best: {bestPet.pet} ({bestPet.yield.toFixed(1)}%)</span>}
+                            {lowPet && <span className="badge bg-soft-danger text-danger" style={{ fontSize: '0.65rem' }}>Low: {lowPet.pet} ({lowPet.yield.toFixed(1)}%)</span>}
                         </div>
                         <div className="card-body p-2">
                             <div style={{ width: '100%', height: 320 }}>
