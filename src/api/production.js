@@ -8,4 +8,5 @@ export const productionApi = {
     getReports: (params) => api.get('/production/reports/', { params }),
     getReportOeeMetrics: (id) => api.get(`/production/reports/${id}/oee_metrics/`),
     getOeeSummary: (params) => api.get('/production/reports/oee_summary/', { params }),
+    getMaterialConsumptions: (params) => api.get('/production/material-consumptions/', { params }),
 };

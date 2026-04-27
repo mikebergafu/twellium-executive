@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { PieChart, Pie, Cell, Tooltip } from 'recharts';
+import { Tooltip, ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Legend, BarChart, Bar } from 'recharts';
 import { productionApi } from '../../api/production';
 import { useApiWithFilters } from '../../utils/useApiWithFilters';
 import { SkeletonGauges } from '../../components/ui/Skeletons';
@@ -122,6 +122,7 @@ const OeeGauge = ({ value, label, calculation, rawValues }) => {
 /* ── component ───────────────────────────────────── */
 const ALL_PET_NAMES = ['Pet 1', 'Pet 2', 'Pet 3', 'Pet 4', 'Pet 5', 'Pet 6'];
 const normPet = (name) => { const num = name?.match(/(\d+)/)?.[0]; return num ? `Pet ${num}` : name; };
+const sortPetByNumber = (a, b) => parseInt(a?.match(/(\d+)/)?.[0] || '999') - parseInt(b?.match(/(\d+)/)?.[0] || '999');
 
 const Overview = () => {
     const { getParams, filters } = useApiWithFilters();
@@ -129,6 +130,11 @@ const Overview = () => {
 
     // Independent OEE gauges date filter (defaults to previous day)
     const [oeeDate, setOeeDate] = useState(() => {
+        const d = new Date();
+        d.setDate(d.getDate() - 1);
+        return d.toISOString().split('T')[0];
+    });
+    const [materialDate, setMaterialDate] = useState(() => {
         const d = new Date();
         d.setDate(d.getDate() - 1);
         return d.toISOString().split('T')[0];
@@ -148,6 +154,8 @@ const Overview = () => {
     const [rawStoppages, setRawStoppages] = useState([]);
     const [hourlyReports, setHourlyReports] = useState([]);
     const [shiftOeeReports, setShiftOeeReports] = useState([]);
+    const [materialConsumptions, setMaterialConsumptions] = useState([]);
+    const [materialReportPetMap, setMaterialReportPetMap] = useState({});
     const [shifts, setShifts] = useState([]);
     const [currentShiftInfo, setCurrentShiftInfo] = useState(null);
     const [selectedShiftId, setSelectedShiftId] = useState(null);
@@ -260,6 +268,47 @@ const Overview = () => {
         };
         fetchOeeData();
     }, [oeeDate]);
+
+    useEffect(() => {
+        if (!materialDate) return;
+        const fetchMaterials = async () => {
+            try {
+                const [materialsRes, reportsRes] = await Promise.all([
+                    productionApi.getMaterialConsumptions({ production_date: materialDate }),
+                    productionApi.getReports({ production_date: materialDate, page_size: 1000 }),
+                ]);
+
+                const toList = (payload) => {
+                    if (Array.isArray(payload)) return payload;
+                    if (Array.isArray(payload?.data)) return payload.data;
+                    if (Array.isArray(payload?.results)) return payload.results;
+                    if (Array.isArray(payload?.data?.results)) return payload.data.results;
+                    return [];
+                };
+
+                const materials = toList(materialsRes.data);
+                const reports = toList(reportsRes.data);
+                const reportMap = {};
+
+                reports
+                    .filter(r => !(r.pet_name || r.line_name || '').toLowerCase().includes('can'))
+                    .forEach(r => {
+                        const pet = normPet(r.pet_name || r.line_name);
+                        if (!pet) return;
+                        [r.id, r.report_id, r.pk].forEach(id => {
+                            if (id !== undefined && id !== null) reportMap[String(id)] = pet;
+                        });
+                    });
+
+                setMaterialConsumptions(materials);
+                setMaterialReportPetMap(reportMap);
+            } catch {
+                setMaterialConsumptions([]);
+                setMaterialReportPetMap({});
+            }
+        };
+        fetchMaterials();
+    }, [materialDate]);
 
     /* Load shift data separately */
     const loadShiftData = useCallback(async () => {
@@ -393,7 +442,7 @@ const Overview = () => {
     }, [loadShiftData]);
 
     /* Slider auto-advance */
-    const SLIDER_PANELS = 6;
+    const SLIDER_PANELS = 8;
     useEffect(() => {
         if (!sliderMode) { clearInterval(sliderTimerRef.current); return; }
         sliderTimerRef.current = setInterval(() => setSliderIndex(i => (i + 1) % SLIDER_PANELS), sliderSeconds * 1000);
@@ -656,12 +705,74 @@ const Overview = () => {
                 stoppageCount: l.reports,
                 lastUpdated: null,
             };
-        }).sort((a, b) => {
-            const aNum = parseInt(a.name?.match(/(\d+)/)?.[0] || '999');
-            const bNum = parseInt(b.name?.match(/(\d+)/)?.[0] || '999');
-            return aNum - bNum;
-        });
+        }).sort((a, b) => sortPetByNumber(a.name, b.name));
     }, [hourlyReports, rawPets, currentShiftInfo, shiftOeeReports]);
+
+    const petLineNames = useMemo(() => {
+        const names = new Set(ALL_PET_NAMES);
+        rawPets.forEach(pet => {
+            const name = normPet(pet?.pet_name);
+            if (name) names.add(name);
+        });
+        return Array.from(names).sort(sortPetByNumber);
+    }, [rawPets]);
+
+    const stoppagesPerPetLine = useMemo(() => {
+        const petMap = {};
+        petLineNames.forEach(name => {
+            petMap[name] = { name, total: 0, downtime: 0, runTime: 0, stoppageCount: 0 };
+        });
+
+        rawStoppages.forEach(s => {
+            const name = normPet(s.pet_name || s.line_name);
+            if (!name) return;
+            if (!petMap[name]) petMap[name] = { name, total: 0, downtime: 0, runTime: 0, stoppageCount: 0 };
+
+            const downtime = Number(s.downtime_minutes);
+            const safeDowntime = Number.isFinite(downtime) ? downtime : 0;
+
+            petMap[name].total += 1;
+            petMap[name].downtime += safeDowntime;
+            petMap[name].runTime += Math.max(0, 60 - safeDowntime);
+            petMap[name].stoppageCount += Array.isArray(s.incidents) ? s.incidents.length : 0;
+        });
+
+        return Object.values(petMap).sort((a, b) => sortPetByNumber(a.name, b.name));
+    }, [petLineNames, rawStoppages]);
+
+    const resourceConsumptionByPet = useMemo(() => {
+        const ELEC = 2.5;
+        const WATER = 1.8;
+        const petMap = {};
+
+        petLineNames.forEach(name => {
+            petMap[name] = { name, bottles: 0, runMins: 0, electricity: 0, water: 0 };
+        });
+
+        rawStoppages.forEach(r => {
+            const name = normPet(r.pet_name || r.line_name);
+            if (!name) return;
+            if (!petMap[name]) petMap[name] = { name, bottles: 0, runMins: 0, electricity: 0, water: 0 };
+
+            const downtime = Number(r.downtime_minutes);
+            const safeDowntime = Number.isFinite(downtime) ? downtime : 0;
+            const runMins = Math.max(0, 60 - safeDowntime);
+            const bottles = Number(r.bottles_produced) || 0;
+
+            petMap[name].bottles += bottles;
+            petMap[name].runMins += runMins;
+            petMap[name].electricity += runMins * ELEC;
+            petMap[name].water += bottles * WATER;
+        });
+
+        const pets = Object.values(petMap).sort((a, b) => sortPetByNumber(a.name, b.name));
+        const totalElectricity = pets.reduce((s, p) => s + p.electricity, 0);
+        const totalWater = pets.reduce((s, p) => s + p.water, 0);
+        const maxElectricity = Math.max(1, ...pets.map(p => p.electricity));
+        const maxWater = Math.max(1, ...pets.map(p => p.water));
+
+        return { pets, totalElectricity, totalWater, maxElectricity, maxWater };
+    }, [petLineNames, rawStoppages]);
 
     const gaugeColor = (v) => v >= 85 ? '#22c55e' : v >= 60 ? '#f59e0b' : '#ef4444';
     const isLoading = initialLoading || refreshing;
@@ -670,6 +781,121 @@ const Overview = () => {
     const activeDateLabel = new Date(oeeDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
     const shiftDateLabel = new Date(shiftFilterDate + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     const runningLinesCount = hourlyOeeByLine.filter(line => line.reports > 0 && line.production > 0).length;
+    const renderResourceConsumptionByPet = () => {
+        const { pets, totalElectricity, totalWater, maxElectricity, maxWater } = resourceConsumptionByPet;
+        if (!pets.length) return <div className="text-center text-muted py-4">No data</div>;
+        return (
+            <div className="card mb-2">
+                <div className="card-header py-2 d-flex align-items-center gap-2 flex-wrap">
+                    <i className="ti ti-leaf text-primary"></i>
+                    <h6 className="mb-0 fw-bold">Resource Consumption by PET</h6>
+                    <span className="badge bg-soft-primary text-primary ms-1">{activeDateLabel}</span>
+                    <span className="badge bg-soft-warning text-warning ms-auto">Electricity: {Math.round(totalElectricity).toLocaleString()} kWh</span>
+                    <span className="badge bg-soft-info text-info">Water: {Math.round(totalWater).toLocaleString()} L</span>
+                </div>
+                <div className="card-body p-2">
+                    <div className="d-flex flex-nowrap justify-content-around gap-2" style={{ overflowX: 'auto' }}>
+                        {pets.map(p => {
+                            const elecPct = (p.electricity / maxElectricity) * 100;
+                            const waterPct = (p.water / maxWater) * 100;
+                            return (
+                                <div key={p.name} style={{ flexShrink: 0, minWidth: 160 }}>
+                                    <div className="rounded-3 p-2 h-100" style={{ background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+                                        <div className="d-flex align-items-center justify-content-between mb-2">
+                                            <div style={{ fontSize: '0.78rem', fontWeight: 800, color: '#1e293b' }}>{p.name}</div>
+                                            <span className="badge bg-light text-dark" style={{ fontSize: '0.62rem' }}>{Math.round(p.runMins)} min</span>
+                                        </div>
+                                        <div className="mb-2">
+                                            <div className="d-flex justify-content-between align-items-center" style={{ fontSize: '0.68rem' }}>
+                                                <span style={{ color: '#64748b' }}><i className="ti ti-bolt me-1" style={{ color: '#eab308' }}></i>Electricity</span>
+                                                <span style={{ fontWeight: 700, color: '#0f172a' }}>{Math.round(p.electricity).toLocaleString()} kWh</span>
+                                            </div>
+                                            <div style={{ height: 6, background: '#fde68a55', borderRadius: 999, overflow: 'hidden' }}>
+                                                <div style={{ width: `${Math.min(100, elecPct)}%`, height: '100%', background: '#eab308' }} />
+                                            </div>
+                                        </div>
+                                        <div className="mb-1">
+                                            <div className="d-flex justify-content-between align-items-center" style={{ fontSize: '0.68rem' }}>
+                                                <span style={{ color: '#64748b' }}><i className="ti ti-droplet me-1" style={{ color: '#06b6d4' }}></i>Water</span>
+                                                <span style={{ fontWeight: 700, color: '#0f172a' }}>{Math.round(p.water).toLocaleString()} L</span>
+                                            </div>
+                                            <div style={{ height: 6, background: '#bae6fd55', borderRadius: 999, overflow: 'hidden' }}>
+                                                <div style={{ width: `${Math.min(100, waterPct)}%`, height: '100%', background: '#06b6d4' }} />
+                                            </div>
+                                        </div>
+                                        <div className="mt-2 pt-1" style={{ borderTop: '1px dashed #e2e8f0', fontSize: '0.65rem', color: '#64748b' }}>
+                                            Bottles: <span style={{ fontWeight: 700, color: '#334155' }}>{Math.round(p.bottles).toLocaleString()}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            </div>
+        );
+    };
+    const renderYieldGroupByPet = ({ title, icon, iconClass, factor, unit, divisor = 1, color, barBg }) => {
+        const petMap = {};
+        petLineNames.forEach(name => { petMap[name] = { name, bottles: 0, consumption: 0 }; });
+
+        rawStoppages.forEach(r => {
+            const name = normPet(r.pet_name || r.line_name);
+            if (!name) return;
+            if (!petMap[name]) petMap[name] = { name, bottles: 0, consumption: 0 };
+
+            const bottles = Number(r.bottles_produced) || 0;
+            petMap[name].bottles += bottles;
+            petMap[name].consumption += (bottles * factor) / divisor;
+        });
+
+        const pets = Object.values(petMap).sort((a, b) => sortPetByNumber(a.name, b.name));
+        if (!pets.length) return <div className="text-center text-muted py-4">No data</div>;
+
+        const totalConsumption = pets.reduce((s, p) => s + p.consumption, 0);
+        const maxConsumption = Math.max(1, ...pets.map(p => p.consumption));
+
+        const chartData = pets.map(p => ({
+            name: p.name,
+            consumption: +p.consumption.toFixed(1),
+            bottles: p.bottles,
+            share: totalConsumption > 0 ? +((p.consumption / totalConsumption) * 100).toFixed(1) : 0,
+        }));
+
+        return (
+            <div className="card mb-2">
+                <div className="card-header py-2 d-flex align-items-center gap-2 flex-wrap">
+                    <i className={`ti ${icon} ${iconClass}`}></i>
+                    <h6 className="mb-0 fw-bold">{title}</h6>
+                    <span className="badge bg-soft-info text-info ms-1">{activeDateLabel}</span>
+                    <span className="badge bg-soft-primary text-primary ms-auto">Total: {totalConsumption.toFixed(1)} {unit}</span>
+                </div>
+                <div className="card-body p-2">
+                    <ResponsiveContainer width="100%" height={200}>
+                        <LineChart data={chartData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                            <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#64748b' }} />
+                            <YAxis tick={{ fontSize: 11, fill: '#64748b' }} tickFormatter={v => `${v} ${unit}`} />
+                            <Tooltip
+                                formatter={(v, name) => name === 'consumption' ? [`${v} ${unit}`, 'Consumption'] : [`${v}%`, 'Share']}
+                                labelFormatter={l => l}
+                                contentStyle={{ fontSize: '0.75rem' }}
+                            />
+                            <Line type="monotone" dataKey="consumption" stroke={color} strokeWidth={2.5} dot={{ r: 5, fill: color, strokeWidth: 2, stroke: '#fff' }} activeDot={{ r: 7 }} />
+                        </LineChart>
+                    </ResponsiveContainer>
+                    <div className="d-flex justify-content-around mt-1" style={{ fontSize: '0.68rem', color: '#64748b' }}>
+                        {chartData.map(p => (
+                            <div key={p.name} className="text-center">
+                                <div style={{ fontWeight: 700, color }}>{p.share}%</div>
+                                <div>{p.bottles.toLocaleString()} btl</div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </div>
+        );
+    };
     return (
         <div style={{ background: '#e9eff6', minHeight: '100vh', padding: '10px 14px' }}>
             {/* ── Top Bar ─────────────────────────── */}
@@ -939,15 +1165,7 @@ const Overview = () => {
                     </div>
                     <div className="slide-panel" key={sliderIndex}>
                         {sliderIndex === 0 && (() => {
-                            const petMap = {};
-                            rawStoppages.forEach(s => {
-                                const name = s.pet_name; if (!name) return;
-                                if (!petMap[name]) petMap[name] = { name, total: 0, downtime: 0, runTime: 0, stoppageCount: 0 };
-                                petMap[name].total += 1; petMap[name].downtime += s.downtime_minutes || 0;
-                                petMap[name].runTime += 60 - (s.downtime_minutes || 0); petMap[name].stoppageCount += (s.incidents?.length || 0);
-                            });
-                            const pets = Object.values(petMap).sort((a, b) => parseInt(a.name?.match(/(\d+)/)?.[0]||'999') - parseInt(b.name?.match(/(\d+)/)?.[0]||'999'));
-                            if (!pets.length) return <div className="text-center text-muted py-4">No stoppage data</div>;
+                            const pets = stoppagesPerPetLine;
                             return (
                                 <div className="card mb-2">
                                     <div className="card-header py-2 d-flex align-items-center gap-2"><i className="ti ti-table text-warning"></i><h6 className="mb-0 fw-bold">Stoppages per PET Line</h6><span className="badge bg-soft-warning text-warning ms-1">{activeDateLabel}</span></div>
@@ -982,129 +1200,9 @@ const Overview = () => {
                                 </div>
                             );
                         })()}
-                        {sliderIndex === 1 && (() => {
-                            const ELEC=2.5,WATER=1.8;
-                            const petMap = {};
-                            ALL_PET_NAMES.forEach(n => { petMap[n] = { name: n, bottles: 0, runMins: 0 }; });
-                            rawStoppages.forEach(r => {
-                                const n = normPet(r.pet_name); if (!n) return;
-                                if (!petMap[n]) petMap[n] = { name: n, bottles: 0, runMins: 0 };
-                                petMap[n].bottles += r.bottles_produced || 0;
-                                petMap[n].runMins += 60 - (r.downtime_minutes || 0);
-                            });
-                            const pets = Object.values(petMap).sort((a,b) => parseInt(a.name?.match(/(\d+)/)?.[0]||'999') - parseInt(b.name?.match(/(\d+)/)?.[0]||'999'));
-                            if (!pets.length) return <div className="text-center text-muted py-4">No data</div>;
-                            const isWater = (name) => /pet\s*5/i.test(name);
-                            const allMaterials = [
-                                {label:'Electricity',unit:'kWh',fn:p=>p.runMins*ELEC,color:'#eab308'},
-                                {label:'Water',unit:'L',fn:p=>p.bottles*WATER,color:'#06b6d4'},
-                            ];
-                            return (
-                                <div className="card mb-2">
-                                    <div className="card-header py-2 d-flex align-items-center gap-2"><i className="ti ti-leaf text-primary"></i><h6 className="mb-0 fw-bold">Resource Consumption by PET</h6><span className="badge bg-soft-primary text-primary ms-1">{activeDateLabel}</span></div>
-                                    <div className="card-body p-2">
-                                        <div className="d-flex flex-nowrap justify-content-around gap-2" style={{overflowX:'auto'}}>
-                                            {pets.map(p => {
-                                                const materials = allMaterials.filter(m => !(m.skipWater && isWater(p.name)));
-                                                const data = materials.map(m => ({name:m.label, value:parseFloat(m.fn(p).toFixed(2)), fill:m.color, unit:m.unit})).filter(d => d.value > 0);
-                                                return (
-                                                    <div key={p.name} style={{flexShrink:0,minWidth:100}}>
-                                                        <div className="rounded-3 p-2 h-100" style={{background:'#f8fafc',border:'1px solid #e2e8f0'}}>
-                                                            <div style={{fontSize:'0.75rem',fontWeight:700,color:'#1e293b',marginBottom:6}}>{p.name}</div>
-                                                            {data.map(d => (
-                                                                <div key={d.name} className="d-flex align-items-center gap-1 mb-1">
-                                                                    <span style={{width:8,height:8,borderRadius:'50%',background:d.fill,flexShrink:0}}></span>
-                                                                    <span style={{fontSize:'0.7rem',color:'#64748b',flex:1}}>{d.name}</span>
-                                                                    <span style={{fontSize:'0.75rem',fontWeight:700,color:'#0f172a'}}>{d.value.toLocaleString()}{d.unit?` ${d.unit}`:''}</span>
-                                                                </div>
-                                                            ))}
-                                                        </div>
-                                                    </div>
-                                                );
-                                            })}
-                                        </div>
-                                    </div>
-                                </div>
-                            );
-                        })()}
-                        {sliderIndex === 2 && (() => {
-                            const SYRUP=0.25;
-                            const petMap = {};
-                            ALL_PET_NAMES.forEach(n => { petMap[n] = { name: n, bottles: 0 }; });
-                            rawStoppages.forEach(r => {
-                                const n = normPet(r.pet_name); if (!n) return;
-                                if (!petMap[n]) petMap[n] = { name: n, bottles: 0 };
-                                petMap[n].bottles += r.bottles_produced || 0;
-                            });
-                            const pets = Object.values(petMap).sort((a,b) => parseInt(a.name?.match(/(\d+)/)?.[0]||'999') - parseInt(b.name?.match(/(\d+)/)?.[0]||'999'));
-                            if (!pets.length) return <div className="text-center text-muted py-4">No data</div>;
-                            const totalBottles = pets.reduce((s,p)=>s+p.bottles,0);
-                            return (
-                                <div className="card mb-2">
-                                    <div className="card-header py-2 d-flex align-items-center gap-2"><i className="ti ti-droplet text-purple"></i><h6 className="mb-0 fw-bold">Syrup Yield</h6><span className="badge bg-soft-info text-info ms-1">{activeDateLabel}</span></div>
-                                    <div className="card-body p-2">
-                                        <div className="d-flex flex-nowrap justify-content-around gap-2" style={{overflowX:'auto'}}>
-                                            {pets.map(p => {
-                                                const pct = totalBottles > 0 ? (p.bottles / totalBottles) * 100 : 0;
-                                                const syrup = (p.bottles * SYRUP / 1000).toFixed(1);
-                                                const data = [{ name: 'Used', value: pct, fill: '#8b5cf6' }, { name: 'Rest', value: 100 - pct, fill: '#ede9fe' }];
-                                                return (
-                                                    <div key={p.name} className="text-center" style={{flexShrink:0,minWidth:120}}>
-                                                        <div style={{fontSize:'0.75rem',fontWeight:700,color:'#1e293b',marginBottom:4}}>{p.name}</div>
-                                                        <PieChart width={110} height={110}>
-                                                            <Pie data={data} cx={50} cy={50} innerRadius={30} outerRadius={48} dataKey="value" startAngle={90} endAngle={-270}>
-                                                                {data.map((d,i) => <Cell key={i} fill={d.fill} />)}
-                                                            </Pie>
-                                                        </PieChart>
-                                                        <div style={{fontSize:'1rem',fontWeight:800,color:'#8b5cf6',marginTop:-8}}>{pct.toFixed(1)}%</div>
-                                                        <div style={{fontSize:'0.65rem',color:'#94a3b8'}}>{syrup} L</div>
-                                                    </div>
-                                                );
-                                            })}
-                                        </div>
-                                    </div>
-                                </div>
-                            );
-                        })()}
-                        {sliderIndex === 3 && (() => {
-                            const CO2=0.006;
-                            const petMap = {};
-                            ALL_PET_NAMES.forEach(n => { petMap[n] = { name: n, bottles: 0 }; });
-                            rawStoppages.forEach(r => {
-                                const n = normPet(r.pet_name); if (!n) return;
-                                if (!petMap[n]) petMap[n] = { name: n, bottles: 0 };
-                                petMap[n].bottles += r.bottles_produced || 0;
-                            });
-                            const pets = Object.values(petMap).sort((a,b) => parseInt(a.name?.match(/(\d+)/)?.[0]||'999') - parseInt(b.name?.match(/(\d+)/)?.[0]||'999'));
-                            if (!pets.length) return <div className="text-center text-muted py-4">No data</div>;
-                            const totalBottles = pets.reduce((s,p)=>s+p.bottles,0);
-                            return (
-                                <div className="card mb-2">
-                                    <div className="card-header py-2 d-flex align-items-center gap-2"><i className="ti ti-cloud text-info"></i><h6 className="mb-0 fw-bold">CO₂ Yield</h6><span className="badge bg-soft-info text-info ms-1">{activeDateLabel}</span></div>
-                                    <div className="card-body p-2">
-                                        <div className="d-flex flex-nowrap justify-content-around gap-2" style={{overflowX:'auto'}}>
-                                            {pets.map(p => {
-                                                const pct = totalBottles > 0 ? (p.bottles / totalBottles) * 100 : 0;
-                                                const co2 = (p.bottles * CO2).toFixed(1);
-                                                const data = [{ name: 'Used', value: pct, fill: '#0ea5e9' }, { name: 'Rest', value: 100 - pct, fill: '#e0f2fe' }];
-                                                return (
-                                                    <div key={p.name} className="text-center" style={{flexShrink:0,minWidth:120}}>
-                                                        <div style={{fontSize:'0.75rem',fontWeight:700,color:'#1e293b',marginBottom:4}}>{p.name}</div>
-                                                        <PieChart width={110} height={110}>
-                                                            <Pie data={data} cx={50} cy={50} innerRadius={30} outerRadius={48} dataKey="value" startAngle={90} endAngle={-270}>
-                                                                {data.map((d,i) => <Cell key={i} fill={d.fill} />)}
-                                                            </Pie>
-                                                        </PieChart>
-                                                        <div style={{fontSize:'1rem',fontWeight:800,color:'#0ea5e9',marginTop:-8}}>{pct.toFixed(1)}%</div>
-                                                        <div style={{fontSize:'0.65rem',color:'#94a3b8'}}>{co2} kg</div>
-                                                    </div>
-                                                );
-                                            })}
-                                        </div>
-                                    </div>
-                                </div>
-                            );
-                        })()}
+                        {sliderIndex === 1 && renderResourceConsumptionByPet()}
+                        {sliderIndex === 2 && renderYieldGroupByPet({ title: 'Syrup Yield', icon: 'ti-droplet', iconClass: 'text-purple', factor: 0.25, divisor: 1000, unit: 'L', color: '#8b5cf6', barBg: '#ede9fe' })}
+                        {sliderIndex === 3 && renderYieldGroupByPet({ title: 'CO₂ Yield', icon: 'ti-cloud', iconClass: 'text-info', factor: 0.006, unit: 'kg', color: '#0ea5e9', barBg: '#e0f2fe' })}
                         {sliderIndex === 4 && downtimeCategories.length > 0 && (() => {
                             const max = downtimeCategories[0]?.value || 1;
                             const total = downtimeCategories.reduce((s,c)=>s+c.value,0);
@@ -1148,6 +1246,126 @@ const Overview = () => {
                                 </div>
                             );
                         })()}
+                        {sliderIndex === 6 && (() => {
+                            const resolvePet = (m) => {
+                                const reportRef = m?.report?.id ?? m?.report;
+                                const fromReport = reportRef !== undefined && reportRef !== null ? materialReportPetMap[String(reportRef)] : null;
+                                if (fromReport) return fromReport;
+                                if (m.pet_name) return normPet(m.pet_name);
+                                if (m.line_name) return normPet(m.line_name);
+                                return 'Unassigned';
+                            };
+                            const materialTypes = {};
+                            materialConsumptions.forEach(m => {
+                                const type = m.material_type;
+                                if (!materialTypes[type]) materialTypes[type] = { label: m.material_type_display, unit: m.unit, pets: {} };
+                                const pet = resolvePet(m);
+                                if (!materialTypes[type].pets[pet]) materialTypes[type].pets[pet] = { used: 0, losses: 0 };
+                                materialTypes[type].pets[pet].used += parseFloat(m.used) || 0;
+                                materialTypes[type].pets[pet].losses += parseFloat(m.losses) || 0;
+                            });
+                            const COLORS = { PREFORMS: '#f59e0b', CLOSURES: '#8b5cf6', LABELS: '#0ea5e9', SHRINK: '#06b6d4', GLUE: '#16a34a' };
+                            const types = Object.entries(materialTypes).sort((a, b) => (a[1].label || a[0]).localeCompare(b[1].label || b[0]));
+                            const allPets = [...new Set([...petLineNames, ...Array.from(new Set(types.flatMap(([, info]) => Object.keys(info.pets || {})))).filter(n => !/^pet\s*\d+/i.test(n))])].sort(sortPetByNumber);
+                            const yieldColor = (v) => v >= 98 ? '#16a34a' : v >= 95 ? '#d97706' : '#dc2626';
+                            if (!types.length) return <div className="card mb-2"><div className="card-body text-center text-muted py-4">No material consumption data</div></div>;
+                            return (
+                                <div className="card mb-2">
+                                    <div className="card-header py-2 d-flex align-items-center gap-2">
+                                        <i className="ti ti-stack text-warning"></i>
+                                        <h6 className="mb-0 fw-bold">Material Consumptions</h6>
+                                        <span className="badge bg-soft-warning text-warning ms-1">{materialDate}</span>
+                                    </div>
+                                    <div className="card-body p-0">
+                                        <div className="table-responsive">
+                                            <table className="table table-sm table-bordered mb-0" style={{ fontSize: '0.68rem', lineHeight: 1.2 }}>
+                                                <thead>
+                                                    <tr style={{ background: '#f8fafc' }}>
+                                                        <th style={{ padding: '3px 6px', fontWeight: 700, whiteSpace: 'nowrap' }}>Material</th>
+                                                        {allPets.map(pet => <th key={pet} className="text-center" style={{ padding: '3px 4px', fontWeight: 700, whiteSpace: 'nowrap' }}>{pet}</th>)}
+                                                        <th className="text-center" style={{ padding: '3px 4px', fontWeight: 700 }}>Total</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {types.map(([type, info]) => {
+                                                        const color = COLORS[type] || '#64748b';
+                                                        const totalUsed = Object.values(info.pets).reduce((s, v) => s + v.used, 0);
+                                                        const totalLosses = Object.values(info.pets).reduce((s, v) => s + v.losses, 0);
+                                                        const totalYield = totalUsed > 0 ? ((totalUsed - totalLosses) / totalUsed * 100) : 0;
+                                                        return (
+                                                            <tr key={type}>
+                                                                <td style={{ padding: '3px 6px', borderLeft: `3px solid ${color}`, whiteSpace: 'nowrap' }}>
+                                                                    <b style={{ color }}>{info.label}</b> <span style={{ color: '#94a3b8' }}>({info.unit})</span>
+                                                                </td>
+                                                                {allPets.map(pet => {
+                                                                    const v = info.pets[pet];
+                                                                    if (!v) return <td key={pet} className="text-center" style={{ padding: '3px 4px', color: '#cbd5e1' }}>—</td>;
+                                                                    const pYield = v.used > 0 ? ((v.used - v.losses) / v.used * 100) : 0;
+                                                                    return (
+                                                                        <td key={pet} className="text-center" style={{ padding: '3px 4px', whiteSpace: 'nowrap' }}>
+                                                                            <span style={{ fontWeight: 800, color: yieldColor(pYield) }}>{pYield.toFixed(1)}%</span>
+                                                                            <br /><span style={{ color: '#64748b' }}>{v.used.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                                                                            {v.losses > 0 && <span style={{ color: '#dc2626' }}> / -{v.losses.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>}
+                                                                        </td>
+                                                                    );
+                                                                })}
+                                                                <td className="text-center" style={{ padding: '3px 4px', background: '#f8fafc' }}>
+                                                                    <span className="px-1 rounded-pill" style={{ fontWeight: 800, fontSize: '0.7rem', color: '#fff', background: yieldColor(totalYield) }}>{totalYield.toFixed(1)}%</span>
+                                                                    <br /><span style={{ color: '#64748b' }}>{totalUsed.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                                                                </td>
+                                                            </tr>
+                                                        );
+                                                    })}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })()}
+                        {sliderIndex === 7 && (() => {
+                            const resolvePet = (m) => {
+                                const reportRef = m?.report?.id ?? m?.report;
+                                const fromReport = reportRef !== undefined && reportRef !== null ? materialReportPetMap[String(reportRef)] : null;
+                                if (fromReport) return fromReport;
+                                if (m.pet_name) return normPet(m.pet_name);
+                                if (m.line_name) return normPet(m.line_name);
+                                return 'Unassigned';
+                            };
+                            const petTotals = {};
+                            materialConsumptions.forEach(m => {
+                                const pet = resolvePet(m);
+                                if (!petTotals[pet]) petTotals[pet] = { used: 0, losses: 0 };
+                                petTotals[pet].used += parseFloat(m.used) || 0;
+                                petTotals[pet].losses += parseFloat(m.losses) || 0;
+                            });
+                            const allPets = [...new Set([...petLineNames, ...Object.keys(petTotals).filter(n => !/^pet\s*\d+/i.test(n))])].sort(sortPetByNumber);
+                            const chartData = allPets.map(pet => {
+                                const v = petTotals[pet] || { used: 0, losses: 0 };
+                                return { name: pet, yield: v.used > 0 ? +((v.used - v.losses) / v.used * 100).toFixed(2) : 0 };
+                            });
+                            if (!chartData.length) return <div className="card mb-2"><div className="card-body text-center text-muted py-4">No material yield data</div></div>;
+                            return (
+                                <div className="card mb-2">
+                                    <div className="card-header py-2 d-flex align-items-center gap-2">
+                                        <i className="ti ti-chart-bar text-success"></i>
+                                        <h6 className="mb-0 fw-bold">Material Yield by PET</h6>
+                                        <span className="badge bg-soft-warning text-warning ms-1">{materialDate}</span>
+                                    </div>
+                                    <div className="card-body p-2">
+                                        <ResponsiveContainer width="100%" height={220}>
+                                            <BarChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 5 }} barCategoryGap={0} barGap={0}>
+                                                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                                                <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#64748b' }} />
+                                                <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: '#64748b' }} tickFormatter={v => `${v}%`} />
+                                                <Tooltip formatter={(v) => [`${v}%`, 'Yield']} />
+                                                <Bar dataKey="yield" fill="#16a34a" />
+                                            </BarChart>
+                                        </ResponsiveContainer>
+                                    </div>
+                                </div>
+                            );
+                        })()}
                     </div>
                 </div>
             ) : (
@@ -1156,18 +1374,7 @@ const Overview = () => {
 
             {/* ── Per-PET Stoppages Summary Table ── */}
             {(() => {
-                const petMap = {};
-                rawStoppages.forEach(s => {
-                    const name = s.pet_name;
-                    if (!name) return;
-                    if (!petMap[name]) petMap[name] = { name, total: 0, downtime: 0, runTime: 0, stoppageCount: 0 };
-                    petMap[name].total += 1;
-                    petMap[name].downtime += s.downtime_minutes || 0;
-                    petMap[name].runTime += 60 - (s.downtime_minutes || 0);
-                    petMap[name].stoppageCount += (s.incidents?.length || 0);
-                });
-                const pets = Object.values(petMap).sort((a, b) => parseInt(a.name?.match(/(\d+)/)?.[0]||'999') - parseInt(b.name?.match(/(\d+)/)?.[0]||'999'));
-                if (!pets.length) return null;
+                const pets = stoppagesPerPetLine;
                 return (
                     <div className="card mb-2">
                         <div className="card-header py-2 d-flex align-items-center gap-2">
@@ -1208,164 +1415,209 @@ const Overview = () => {
             })()}
 
 
-            {/* ── Resource Consumption by Material ── */}
+            {/* ── Resource Consumption by PET ── */}
+            {renderResourceConsumptionByPet()}
+
+            {/* ── Material Consumptions ──────────── */}
             {(() => {
-                const ELEC=2.5,WATER=1.8;
-                const petMap = {};
-                ALL_PET_NAMES.forEach(n => { petMap[n] = { name: n, bottles: 0, runMins: 0 }; });
-                rawStoppages.forEach(r => {
-                    const n = normPet(r.pet_name); if (!n) return;
-                    if (!petMap[n]) petMap[n] = { name: n, bottles: 0, runMins: 0 };
-                    petMap[n].bottles += r.bottles_produced || 0;
-                    petMap[n].runMins += 60 - (r.downtime_minutes || 0);
+                const resolvePet = (m) => {
+                    const reportRef = m?.report?.id ?? m?.report;
+                    const fromReport = reportRef !== undefined && reportRef !== null ? materialReportPetMap[String(reportRef)] : null;
+                    if (fromReport) return fromReport;
+                    if (m.pet_name) return normPet(m.pet_name);
+                    if (m.line_name) return normPet(m.line_name);
+                    return 'Unassigned';
+                };
+
+                // Group by material type, then by PET
+                const materialTypes = {};
+                materialConsumptions.forEach(m => {
+                    const type = m.material_type;
+                    if (!materialTypes[type]) materialTypes[type] = { label: m.material_type_display, unit: m.unit, pets: {} };
+                    const pet = resolvePet(m);
+                    if (!materialTypes[type].pets[pet]) materialTypes[type].pets[pet] = { used: 0, losses: 0 };
+                    materialTypes[type].pets[pet].used += parseFloat(m.used) || 0;
+                    materialTypes[type].pets[pet].losses += parseFloat(m.losses) || 0;
                 });
-                const pets = Object.values(petMap).sort((a,b) => parseInt(a.name?.match(/(\d+)/)?.[0]||'999') - parseInt(b.name?.match(/(\d+)/)?.[0]||'999'));
-                if (!pets.length) return null;
-                const isWater2 = (name) => /pet\s*5/i.test(name);
-                const allMaterials = [
-                    {label:'Electricity',unit:'kWh',fn:p=>p.runMins*ELEC,color:'#eab308'},
-                    {label:'Water',unit:'L',fn:p=>p.bottles*WATER,color:'#06b6d4'},
-                ];
+
+                const COLORS = { PREFORMS: '#f59e0b', CLOSURES: '#8b5cf6', LABELS: '#0ea5e9', SHRINK: '#06b6d4', GLUE: '#16a34a' };
+                const types = Object.entries(materialTypes).sort((a, b) => (a[1].label || a[0]).localeCompare(b[1].label || b[0]));
+                const detectedPets = new Set(types.flatMap(([, info]) => Object.keys(info.pets || {})));
+                const unknownPets = Array.from(detectedPets).filter(n => !/^pet\s*\d+/i.test(n)).sort();
+                const allPets = [...new Set([...petLineNames, ...unknownPets])].sort(sortPetByNumber);
+                const yieldColor = (v) => v >= 98 ? '#16a34a' : v >= 95 ? '#d97706' : '#dc2626';
+                const totalsByPet = {};
+                allPets.forEach(pet => { totalsByPet[pet] = { used: 0, losses: 0 }; });
+                types.forEach(([, info]) => {
+                    allPets.forEach(pet => {
+                        const v = info.pets[pet];
+                        if (!v) return;
+                        totalsByPet[pet].used += v.used;
+                        totalsByPet[pet].losses += v.losses;
+                    });
+                });
+                const petYieldSummary = allPets.map(pet => {
+                    const v = totalsByPet[pet] || { used: 0, losses: 0 };
+                    const y = v.used > 0 ? ((v.used - v.losses) / v.used * 100) : 0;
+                    return { pet, yield: y };
+                });
+                const bestPet = petYieldSummary.length ? [...petYieldSummary].sort((a, b) => b.yield - a.yield)[0] : null;
+                const worstPet = petYieldSummary.length ? [...petYieldSummary].sort((a, b) => a.yield - b.yield)[0] : null;
+
                 return (
                     <div className="card mb-2">
-                        <div className="card-header py-2 d-flex align-items-center gap-2">
-                            <i className="ti ti-chart-donut text-primary"></i>
-                            <h6 className="mb-0 fw-bold">Resource Consumption by PET</h6>
-                            <span className="badge bg-soft-primary text-primary ms-1">{activeDateLabel}</span>
-                        </div>
-                        <div className="card-body p-2">
-                            <div className="d-flex flex-nowrap justify-content-around gap-2" style={{overflowX:'auto'}}>
-                                {pets.map(p => {
-                                    const materials = allMaterials.filter(m => !(m.skipWater && isWater2(p.name)));
-                                    const data = materials.map(m => ({name:m.label, value:parseFloat(m.fn(p).toFixed(2)), fill:m.color, unit:m.unit})).filter(d => d.value > 0);
-                                    return (
-                                        <div key={p.name} style={{flexShrink:0,minWidth:100}}>
-                                            <div className="rounded-3 p-2 h-100" style={{background:'#f8fafc',border:'1px solid #e2e8f0'}}>
-                                                <div style={{fontSize:'0.75rem',fontWeight:700,color:'#1e293b',marginBottom:6}}>{p.name}</div>
-                                                {data.map(d => (
-                                                    <div key={d.name} className="d-flex align-items-center gap-1 mb-1">
-                                                        <span style={{width:8,height:8,borderRadius:'50%',background:d.fill,flexShrink:0}}></span>
-                                                        <span style={{fontSize:'0.7rem',color:'#64748b',flex:1}}>{d.name}</span>
-                                                        <span style={{fontSize:'0.75rem',fontWeight:700,color:'#0f172a'}}>{d.value.toLocaleString()}{d.unit?` ${d.unit}`:''}</span>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    );
-                                })}
+                        <div className="card-header py-1 d-flex align-items-center gap-1 flex-wrap">
+                            <i className="ti ti-stack text-warning"></i>
+                            <h6 className="mb-0 fw-bold" style={{ fontSize: '0.82rem' }}>Material Consumptions</h6>
+                            <div className="d-flex align-items-center gap-1 ms-1 px-1 py-0 rounded-2" style={{ border: '1px solid #fde68a', background: '#fffbeb' }}>
+                                <i className="ti ti-calendar" style={{ fontSize: '0.68rem', color: '#b45309' }}></i>
+                                <input
+                                    type="date"
+                                    className="form-control form-control-sm border-0 p-0"
+                                    value={materialDate}
+                                    onChange={(e) => setMaterialDate(e.target.value)}
+                                    max={new Date().toISOString().split('T')[0]}
+                                    style={{ width: 118, fontSize: '0.65rem', background: 'transparent', boxShadow: 'none' }}
+                                    title="Material consumptions date"
+                                />
                             </div>
+                            <span className="badge bg-soft-secondary text-secondary" style={{ fontSize: '0.65rem' }}>PETs: {allPets.length}</span>
+                            {bestPet && <span className="badge bg-soft-success text-success" style={{ fontSize: '0.65rem' }}>Best: {bestPet.pet} ({bestPet.yield.toFixed(1)}%)</span>}
+                            {worstPet && <span className="badge bg-soft-danger text-danger" style={{ fontSize: '0.65rem' }}>Low: {worstPet.pet} ({worstPet.yield.toFixed(1)}%)</span>}
+                        </div>
+                        <div className="card-body p-0">
+                            {!types.length ? (
+                                <div className="text-center py-4 text-muted">No material consumption data for this date</div>
+                            ) : (
+                            <div className="table-responsive" style={{ maxHeight: 300 }}>
+                                <table className="table table-sm table-bordered mb-0" style={{ fontSize: '0.66rem', lineHeight: 1.2 }}>
+                                    <thead>
+                                        <tr style={{ background: '#f8fafc' }}>
+                                            <th style={{ position: 'sticky', left: 0, zIndex: 2, background: '#f8fafc', fontWeight: 700, whiteSpace: 'nowrap', padding: '2px 6px' }}>Material</th>
+                                            {allPets.map(pet => (
+                                                <th key={pet} className="text-center" style={{ fontWeight: 700, padding: '2px 4px', whiteSpace: 'nowrap' }}>
+                                                    <div>{pet}</div>
+                                                </th>
+                                            ))}
+                                            <th className="text-center" style={{ position: 'sticky', right: 0, zIndex: 2, background: '#f8fafc', fontWeight: 700, padding: '2px 4px' }}>Total</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {types.map(([type, info], rowIndex) => {
+                                            const color = COLORS[type] || '#64748b';
+                                            const totalUsed = Object.values(info.pets || {}).reduce((s, v) => s + v.used, 0);
+                                            const totalLosses = Object.values(info.pets || {}).reduce((s, v) => s + v.losses, 0);
+                                            const totalYield = totalUsed > 0 ? ((totalUsed - totalLosses) / totalUsed * 100) : 0;
+                                            return (
+                                                <tr key={type} style={{ background: rowIndex % 2 === 0 ? '#ffffff' : '#f8fafc66' }}>
+                                                    <td style={{ position: 'sticky', left: 0, zIndex: 1, background: rowIndex % 2 === 0 ? '#ffffff' : '#f8fafc', padding: '2px 6px', borderLeft: `3px solid ${color}`, whiteSpace: 'nowrap' }}>
+                                                        <b style={{ color }}>{info.label}</b> <span style={{ color: '#94a3b8' }}>({info.unit})</span>
+                                                    </td>
+                                                    {allPets.map(pet => {
+                                                        const v = info.pets[pet];
+                                                        if (!v) {
+                                                            return (
+                                                                <td key={pet} className="text-center" style={{ padding: '2px 4px', color: '#94a3b8', whiteSpace: 'nowrap' }}>
+                                                                    <span style={{ fontWeight: 700 }}>0.0%</span>
+                                                                    <span style={{ color: '#cbd5e1' }}> · 0</span>
+                                                                </td>
+                                                            );
+                                                        }
+                                                        const pYield = v.used > 0 ? ((v.used - v.losses) / v.used * 100) : 0;
+                                                        return (
+                                                            <td key={pet} className="text-center" style={{ padding: '2px 4px', whiteSpace: 'nowrap' }}>
+                                                                <span style={{ fontWeight: 800, color: yieldColor(pYield) }}>{pYield.toFixed(1)}%</span>
+                                                                <span style={{ color: '#64748b' }}> · {v.used.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                                                                {v.losses > 0 && <span style={{ color: '#dc2626' }}> / -{v.losses.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>}
+                                                            </td>
+                                                        );
+                                                    })}
+                                                    <td className="text-center" style={{ position: 'sticky', right: 0, zIndex: 1, padding: '2px 4px', background: '#f8fafc', whiteSpace: 'nowrap' }}>
+                                                        <span className="px-1 rounded-pill" style={{ fontWeight: 800, fontSize: '0.72rem', color: '#fff', background: yieldColor(totalYield) }}>{totalYield.toFixed(1)}%</span>
+                                                        <span style={{ color: '#64748b' }}> {totalUsed.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
+                            )}
                         </div>
                     </div>
                 );
             })()}
 
-            {/* ── Material Consumptions ──────────── */}
+            {/* ── Material Consumptions (Line Chart) ── */}
             {(() => {
-                const rows = rawReports.filter(r => r.co2_readings || r.syrup_readings || r.production_readings);
-                if (!rows.length) return null;
-                // Build per-PET data points — seed all known PETs first
-                const petMap = {};
-                ALL_PET_NAMES.forEach(n => { petMap[n] = { pet: n, Shrink: 0, Syrup: 0, CO2: 0, Preforms: 0, ShrinkLoss: 0, SyrupLoss: 0, CO2Loss: 0, PreformsLoss: 0 }; });
-                rows.forEach(r => {
-                    const n = normPet(r.pet_name); if (!n) return;
-                    if (!petMap[n]) petMap[n] = { pet: n, Shrink: 0, Syrup: 0, CO2: 0, Preforms: 0, ShrinkLoss: 0, SyrupLoss: 0, CO2Loss: 0, PreformsLoss: 0 };
-                    petMap[n].Shrink    += parseFloat(r.production_readings?.shrink_reading || 0);
-                    petMap[n].ShrinkLoss+= parseFloat(r.production_readings?.blower_rejects || 0);
-                    petMap[n].Syrup     += parseFloat(r.syrup_readings?.total_syrup_used_liters || 0);
-                    petMap[n].SyrupLoss += parseFloat(r.syrup_readings?.std_syrup_consumption || 0);
-                    petMap[n].CO2       += parseFloat(r.co2_readings?.total_co2_consumed_kg || 0);
-                    petMap[n].CO2Loss   += parseFloat(r.co2_readings?.std_co2_consumed_kg || 0);
-                    petMap[n].Preforms  += (r.materials||[]).flatMap(m=>m.data||[]).filter(d=>d.petline_type==='preform').reduce((a,d)=>a+(d.data?.quantity_per_cage_value||0),0);
-                    petMap[n].PreformsLoss += parseFloat(r.production_readings?.filler_rejects || 0);
+                const resolvePet = (m) => {
+                    const reportRef = m?.report?.id ?? m?.report;
+                    const fromReport = reportRef !== undefined && reportRef !== null ? materialReportPetMap[String(reportRef)] : null;
+                    if (fromReport) return fromReport;
+                    if (m.pet_name) return normPet(m.pet_name);
+                    if (m.line_name) return normPet(m.line_name);
+                    return 'Unassigned';
+                };
+
+                const typeLabels = {};
+                const byPet = {};
+                materialConsumptions.forEach(m => {
+                    const type = m.material_type;
+                    const label = m.material_type_display || type;
+                    if (!type) return;
+                    typeLabels[type] = label;
+
+                    const pet = resolvePet(m);
+                    if (!byPet[pet]) byPet[pet] = {};
+                    if (!byPet[pet][type]) byPet[pet][type] = { used: 0, losses: 0 };
+                    byPet[pet][type].used += parseFloat(m.used) || 0;
+                    byPet[pet][type].losses += parseFloat(m.losses) || 0;
                 });
-                const data = Object.values(petMap).sort((a,b) => parseInt(a.pet?.match(/(\d+)/)?.[0]||'999') - parseInt(b.pet?.match(/(\d+)/)?.[0]||'999'));
-                if (!data.length) return null;
-                const BARS = [
-                    {key:'Shrink',lossKey:'ShrinkLoss',color:'#0ea5e9',label:'Shrink (Kg)'},
-                    {key:'Syrup',lossKey:'SyrupLoss',color:'#8b5cf6',label:'Syrup (L)'},
-                    {key:'CO2',lossKey:'CO2Loss',color:'#06b6d4',label:'CO₂ (Kg)'},
-                    {key:'Preforms',lossKey:'PreformsLoss',color:'#f59e0b',label:'Preforms (Pcs)'},
-                ];
+
+                const materialKeys = Object.keys(typeLabels);
+                if (!materialKeys.length) return null;
+
+                const detectedPets = Object.keys(byPet);
+                const unknownPets = detectedPets.filter(n => !/^pet\s*\d+/i.test(n)).sort();
+                const allPets = [...new Set([...petLineNames, ...unknownPets])].sort(sortPetByNumber);
+                const chartData = allPets.map(pet => {
+                    const row = { pet };
+                    materialKeys.forEach(type => {
+                        const v = byPet[pet]?.[type];
+                        const yieldPct = v && v.used > 0 ? ((v.used - v.losses) / v.used) * 100 : 0;
+                        row[type] = Number(yieldPct.toFixed(2));
+                    });
+                    return row;
+                });
+
+                const COLORS = { PREFORMS: '#f59e0b', CLOSURES: '#8b5cf6', LABELS: '#0ea5e9', SHRINK: '#06b6d4', GLUE: '#16a34a' };
+
                 return (
                     <div className="card mb-2">
-                        <div className="card-header py-2 d-flex align-items-center gap-2">
-                            <i className="ti ti-stack text-warning"></i>
-                            <h6 className="mb-0 fw-bold">Material Consumptions</h6>
-                            <span className="badge bg-soft-warning text-warning ms-1">{activeDateLabel}</span>
+                        <div className="card-header py-2 d-flex align-items-center gap-2 flex-wrap">
+                            <i className="ti ti-chart-bar text-info"></i>
+                            <h6 className="mb-0 fw-bold">Material Yield by PET</h6>
+                            <span className="badge bg-soft-info text-info ms-1">{materialDate}</span>
                         </div>
                         <div className="card-body p-2">
-                            <div className="d-flex flex-nowrap justify-content-around" style={{overflowX:'auto'}}>
-                                {BARS.map((b, bi) => {
-                                    const PET_COLORS=['#1d4ed8','#0ea5e9','#8b5cf6','#f59e0b','#16a34a','#dc2626','#06b6d4','#ec4899'];
-                                    const pieData = data.map((p,i) => ({name:p.pet, value:parseFloat((p[b.key]||0).toFixed(2)), fill:PET_COLORS[i%PET_COLORS.length]})).filter(d => d.value > 0);
-                                    const total = pieData.reduce((s,d)=>s+d.value,0);
-                                    
-                                    // Calculate Yield
-                                    const totalLoss = data.reduce((s,p) => s + parseFloat(p[b.lossKey]||0), 0);
-                                    let yieldVal = 0;
-                                    if (total > 0) {
-                                        if (b.key === 'Syrup' || b.key === 'CO2') {
-                                            // For Syrup and CO2, Loss stores the Standard/Target consumption
-                                            yieldVal = (totalLoss / total) * 100;
-                                        } else {
-                                            // For Shrink and Preforms, Loss stores the waste/rejects
-                                            yieldVal = ((total - totalLoss) / total) * 100;
-                                        }
-                                    }
-                                    const yieldColor = yieldVal >= 98 ? '#16a34a' : yieldVal >= 95 ? '#d97706' : '#dc2626';
-
-                                    return (
-                                        <div key={b.key} style={{flexShrink:0,display:'flex',flexDirection:'column',alignItems:'center',borderLeft:bi>0?'1px solid #e2e8f0':'none',paddingLeft:bi>0?16:0,paddingRight:16}}>
-                                            <div style={{fontSize:'0.72rem',fontWeight:700,color:b.color,marginBottom:4}}>{b.label}</div>
-                                            <div className="d-flex align-items-center gap-2">
-                                                <div className="d-flex flex-column gap-1">
-                                                    {data.map((p, i) => {
-                                                        const val = parseFloat((p[b.key]||0).toFixed(2));
-                                                        const loss = parseFloat((p[b.lossKey]||0).toFixed(2));
-                                                        let pYield = 0;
-                                                        if (val > 0) {
-                                                            if (b.key === 'Syrup' || b.key === 'CO2') {
-                                                                pYield = (loss / val) * 100;
-                                                            } else {
-                                                                pYield = ((val - loss) / val) * 100;
-                                                            }
-                                                        }
-                                                        const pFill = PET_COLORS[i % PET_COLORS.length];
-                                                        const pYieldColor = pYield >= 98 ? '#16a34a' : pYield >= 95 ? '#d97706' : '#dc2626';
-
-                                                        return (
-                                                            <div key={p.pet} className="d-flex align-items-center gap-1">
-                                                                <span style={{width:8,height:8,borderRadius:'50%',background:pFill,flexShrink:0,display:'inline-block'}}></span>
-                                                                <span style={{fontSize:'0.62rem',color:'#334155',fontWeight:600,whiteSpace:'nowrap'}}>{p.pet}</span>
-                                                                <span style={{fontSize:'0.62rem',color:'#64748b',whiteSpace:'nowrap'}}>{val.toLocaleString()}</span>
-                                                                {val > 0 && (
-                                                                    <span style={{fontSize:'0.58rem',fontWeight:700,color:pYieldColor,marginLeft:'auto'}}>
-                                                                        {pYield.toFixed(0)}%
-                                                                    </span>
-                                                                )}
-                                                            </div>
-                                                        );
-                                                    })}
-                                                </div>
-                                                <PieChart width={260} height={260}>
-                                                    <Pie data={pieData} cx={125} cy={125} innerRadius={62} outerRadius={105} dataKey="value" paddingAngle={2}>
-                                                        {pieData.map((d,i) => <Cell key={i} fill={d.fill}/>)}
-                                                    </Pie>
-                                                    <Tooltip formatter={(v,n) => [v.toLocaleString(), n]} contentStyle={{fontSize:'0.7rem',padding:'2px 6px'}}/>
-                                                </PieChart>
-                                            </div>
-                                            <div className="d-flex flex-column align-items-center mt-1">
-                                                <div style={{fontSize:'0.65rem',fontWeight:700,color:'#1e293b'}}>Total: {total.toLocaleString()}</div>
-                                                {total > 0 && (
-                                                    <div className="d-flex align-items-center gap-1 mt-1">
-                                                        <span style={{fontSize:'0.75rem',color:'#64748b',fontWeight:600}}>Yield:</span>
-                                                        <span style={{fontSize:'1.1rem',fontWeight:900,color:yieldColor}}>{yieldVal.toFixed(1)}%</span>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </div>
-                                    );
-                                })}
+                            <div style={{ width: '100%', height: 320 }}>
+                                <ResponsiveContainer>
+                                    <BarChart data={chartData} margin={{ top: 8, right: 16, left: 8, bottom: 8 }} barCategoryGap={0} barGap={0}>
+                                        <CartesianGrid strokeDasharray="3 3" />
+                                        <XAxis dataKey="pet" tick={{ fontSize: 11 }} />
+                                        <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} tickFormatter={v => `${v}%`} />
+                                        <Tooltip formatter={(v) => [`${Number(v).toFixed(2)}%`, 'Yield']} />
+                                        <Legend />
+                                        {materialKeys.map(type => (
+                                            <Bar
+                                                key={type}
+                                                dataKey={type}
+                                                name={typeLabels[type]}
+                                                fill={COLORS[type] || '#64748b'}
+                                            />
+                                        ))}
+                                    </BarChart>
+                                </ResponsiveContainer>
                             </div>
                         </div>
                     </div>
@@ -1373,93 +1625,10 @@ const Overview = () => {
             })()}
 
             {/* ── Syrup Yield per Line ──────────── */}
-            {(() => {
-                const SYRUP=0.25;
-                const petMap = {};
-                rawStoppages.forEach(r => {
-                    const n = normPet(r.pet_name); if (!n) return;
-                    if (!petMap[n]) petMap[n] = { name: n, bottles: 0 };
-                    petMap[n].bottles += r.bottles_produced || 0;
-                });
-                const pets = Object.values(petMap).sort((a,b) => parseInt(a.name?.match(/(\d+)/)?.[0]||'999') - parseInt(b.name?.match(/(\d+)/)?.[0]||'999'));
-                if (!pets.length) return null;
-                const totalBottles = pets.reduce((s,p)=>s+p.bottles,0);
-                return (
-                    <div className="card mb-2">
-                        <div className="card-header py-2 d-flex align-items-center gap-2">
-                            <i className="ti ti-droplet text-purple"></i>
-                            <h6 className="mb-0 fw-bold">Syrup Yield</h6>
-                            <span className="badge bg-soft-info text-info ms-1">{activeDateLabel}</span>
-                        </div>
-                        <div className="card-body p-2">
-                            <div className="d-flex flex-nowrap justify-content-around gap-2" style={{overflowX:'auto'}}>
-                                {pets.map(p => {
-                                    const pct = totalBottles > 0 ? (p.bottles / totalBottles) * 100 : 0;
-                                    const syrup = (p.bottles * SYRUP / 1000).toFixed(1);
-                                    const color = pct >= 20 ? '#8b5cf6' : pct >= 10 ? '#a78bfa' : '#c4b5fd';
-                                    const data = [{ name: 'Used', value: pct, fill: '#8b5cf6' }, { name: 'Rest', value: 100 - pct, fill: '#ede9fe' }];
-                                    return (
-                                        <div key={p.name} className="text-center" style={{flexShrink:0,minWidth:120}}>
-                                            <div style={{fontSize:'0.75rem',fontWeight:700,color:'#1e293b',marginBottom:4}}>{p.name}</div>
-                                            <PieChart width={110} height={110}>
-                                                <Pie data={data} cx={50} cy={50} innerRadius={30} outerRadius={48} dataKey="value" startAngle={90} endAngle={-270}>
-                                                    {data.map((d,i) => <Cell key={i} fill={d.fill} />)}
-                                                </Pie>
-                                            </PieChart>
-                                            <div style={{fontSize:'1rem',fontWeight:800,color:'#8b5cf6',marginTop:-8}}>{pct.toFixed(1)}%</div>
-                                            <div style={{fontSize:'0.65rem',color:'#94a3b8'}}>{syrup} L</div>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        </div>
-                    </div>
-                );
-            })()}
+            {renderYieldGroupByPet({ title: 'Syrup Yield', icon: 'ti-droplet', iconClass: 'text-purple', factor: 0.25, divisor: 1000, unit: 'L', color: '#8b5cf6', barBg: '#ede9fe' })}
 
             {/* ── CO₂ Yield per Line ─────────────── */}
-            {(() => {
-                const CO2=0.006;
-                const petMap = {};
-                rawStoppages.forEach(r => {
-                    const n = normPet(r.pet_name); if (!n) return;
-                    if (!petMap[n]) petMap[n] = { name: n, bottles: 0 };
-                    petMap[n].bottles += r.bottles_produced || 0;
-                });
-                const pets = Object.values(petMap).sort((a,b) => parseInt(a.name?.match(/(\d+)/)?.[0]||'999') - parseInt(b.name?.match(/(\d+)/)?.[0]||'999'));
-                if (!pets.length) return null;
-                const totalBottles = pets.reduce((s,p)=>s+p.bottles,0);
-                return (
-                    <div className="card mb-2">
-                        <div className="card-header py-2 d-flex align-items-center gap-2">
-                            <i className="ti ti-cloud text-info"></i>
-                            <h6 className="mb-0 fw-bold">CO₂ Yield</h6>
-                            <span className="badge bg-soft-info text-info ms-1">{activeDateLabel}</span>
-                        </div>
-                        <div className="card-body p-2">
-                            <div className="d-flex flex-nowrap justify-content-around gap-2" style={{overflowX:'auto'}}>
-                                {pets.map(p => {
-                                    const pct = totalBottles > 0 ? (p.bottles / totalBottles) * 100 : 0;
-                                    const co2 = (p.bottles * CO2).toFixed(1);
-                                    const data = [{ name: 'Used', value: pct, fill: '#0ea5e9' }, { name: 'Rest', value: 100 - pct, fill: '#e0f2fe' }];
-                                    return (
-                                        <div key={p.name} className="text-center" style={{flexShrink:0,minWidth:120}}>
-                                            <div style={{fontSize:'0.75rem',fontWeight:700,color:'#1e293b',marginBottom:4}}>{p.name}</div>
-                                            <PieChart width={110} height={110}>
-                                                <Pie data={data} cx={50} cy={50} innerRadius={30} outerRadius={48} dataKey="value" startAngle={90} endAngle={-270}>
-                                                    {data.map((d,i) => <Cell key={i} fill={d.fill} />)}
-                                                </Pie>
-                                            </PieChart>
-                                            <div style={{fontSize:'1rem',fontWeight:800,color:'#0ea5e9',marginTop:-8}}>{pct.toFixed(1)}%</div>
-                                            <div style={{fontSize:'0.65rem',color:'#94a3b8'}}>{co2} kg</div>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        </div>
-                    </div>
-                );
-            })()}
+            {renderYieldGroupByPet({ title: 'CO₂ Yield', icon: 'ti-cloud', iconClass: 'text-info', factor: 0.006, unit: 'kg', color: '#0ea5e9', barBg: '#e0f2fe' })}
 
             {/* ── Stoppage Category Horizontal Bar Chart ── */}
             {downtimeCategories.length > 0 && (() => {
