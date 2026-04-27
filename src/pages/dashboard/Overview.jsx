@@ -1264,7 +1264,7 @@ const Overview = () => {
                                 materialTypes[type].pets[pet].used += parseFloat(m.used) || 0;
                                 materialTypes[type].pets[pet].losses += parseFloat(m.losses) || 0;
                             });
-                            const COLORS = { PREFORMS: '#f59e0b', CLOSURES: '#8b5cf6', LABELS: '#0ea5e9', SHRINK: '#06b6d4', GLUE: '#16a34a' };
+                            const COLORS = { PREFORMS: '#f59e0b', CLOSURES: '#8b5cf6', LABELS: '#0ea5e9', SHRINK: '#ec4899', GLUE: '#16a34a' };
                             const types = Object.entries(materialTypes).sort((a, b) => (a[1].label || a[0]).localeCompare(b[1].label || b[0]));
                             const allPets = [...new Set([...petLineNames, ...Array.from(new Set(types.flatMap(([, info]) => Object.keys(info.pets || {})))).filter(n => !/^pet\s*\d+/i.test(n))])].sort(sortPetByNumber);
                             const yieldColor = (v) => v >= 98 ? '#16a34a' : v >= 95 ? '#d97706' : '#dc2626';
@@ -1354,7 +1354,7 @@ const Overview = () => {
                                     </div>
                                     <div className="card-body p-2">
                                         <ResponsiveContainer width="100%" height={220}>
-                                            <BarChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 5 }} barCategoryGap={0} barGap={0}>
+                                            <BarChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 5 }} barCategoryGap="20%" barGap={1}>
                                                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                                                 <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#64748b' }} />
                                                 <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: '#64748b' }} tickFormatter={v => `${v}%`} />
@@ -1440,7 +1440,7 @@ const Overview = () => {
                     materialTypes[type].pets[pet].losses += parseFloat(m.losses) || 0;
                 });
 
-                const COLORS = { PREFORMS: '#f59e0b', CLOSURES: '#8b5cf6', LABELS: '#0ea5e9', SHRINK: '#06b6d4', GLUE: '#16a34a' };
+                const COLORS = { PREFORMS: '#f59e0b', CLOSURES: '#8b5cf6', LABELS: '#0ea5e9', SHRINK: '#ec4899', GLUE: '#16a34a' };
                 const types = Object.entries(materialTypes).sort((a, b) => (a[1].label || a[0]).localeCompare(b[1].label || b[0]));
                 const detectedPets = new Set(types.flatMap(([, info]) => Object.keys(info.pets || {})));
                 const unknownPets = Array.from(detectedPets).filter(n => !/^pet\s*\d+/i.test(n)).sort();
@@ -1590,7 +1590,7 @@ const Overview = () => {
                     return row;
                 });
 
-                const COLORS = { PREFORMS: '#f59e0b', CLOSURES: '#8b5cf6', LABELS: '#0ea5e9', SHRINK: '#06b6d4', GLUE: '#16a34a' };
+                const COLORS = { PREFORMS: '#f59e0b', CLOSURES: '#8b5cf6', LABELS: '#0ea5e9', SHRINK: '#ec4899', GLUE: '#16a34a' };
 
                 return (
                     <div className="card mb-2">
@@ -1602,7 +1602,7 @@ const Overview = () => {
                         <div className="card-body p-2">
                             <div style={{ width: '100%', height: 320 }}>
                                 <ResponsiveContainer>
-                                    <BarChart data={chartData} margin={{ top: 8, right: 16, left: 8, bottom: 8 }} barCategoryGap={0} barGap={0}>
+                                    <BarChart data={chartData} margin={{ top: 8, right: 16, left: 8, bottom: 8 }} barCategoryGap="20%" barGap={1}>
                                         <CartesianGrid strokeDasharray="3 3" />
                                         <XAxis dataKey="pet" tick={{ fontSize: 11 }} />
                                         <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} tickFormatter={v => `${v}%`} />
