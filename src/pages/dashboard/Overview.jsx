@@ -1332,36 +1332,55 @@ const Overview = () => {
                                 if (m.line_name) return normPet(m.line_name);
                                 return 'Unassigned';
                             };
-                            const petTotals = {};
+                            const typeLabels = {};
+                            const byPet = {};
                             materialConsumptions.forEach(m => {
+                                const type = m.material_type;
+                                const label = m.material_type_display || type;
+                                if (!type) return;
+                                typeLabels[type] = label;
                                 const pet = resolvePet(m);
-                                if (!petTotals[pet]) petTotals[pet] = { used: 0, losses: 0 };
-                                petTotals[pet].used += parseFloat(m.used) || 0;
-                                petTotals[pet].losses += parseFloat(m.losses) || 0;
+                                if (!byPet[pet]) byPet[pet] = {};
+                                if (!byPet[pet][type]) byPet[pet][type] = { used: 0, losses: 0 };
+                                byPet[pet][type].used += parseFloat(m.used) || 0;
+                                byPet[pet][type].losses += parseFloat(m.losses) || 0;
                             });
-                            const allPets = [...new Set([...petLineNames, ...Object.keys(petTotals).filter(n => !/^pet\s*\d+/i.test(n))])].sort(sortPetByNumber);
+                            const materialKeys = Object.keys(typeLabels);
+                            if (!materialKeys.length) return <div className="card mb-2"><div className="card-body text-center text-muted py-4">No material yield data</div></div>;
+                            const detectedPets = Object.keys(byPet);
+                            const unknownPets = detectedPets.filter(n => !/^pet\s*\d+/i.test(n)).sort();
+                            const allPets = [...new Set([...petLineNames, ...unknownPets])].sort(sortPetByNumber);
                             const chartData = allPets.map(pet => {
-                                const v = petTotals[pet] || { used: 0, losses: 0 };
-                                return { name: pet, yield: v.used > 0 ? +((v.used - v.losses) / v.used * 100).toFixed(2) : 0 };
+                                const row = { pet };
+                                materialKeys.forEach(type => {
+                                    const v = byPet[pet]?.[type];
+                                    row[type] = v && v.used > 0 ? Number(((v.used - v.losses) / v.used * 100).toFixed(2)) : 0;
+                                });
+                                return row;
                             });
-                            if (!chartData.length) return <div className="card mb-2"><div className="card-body text-center text-muted py-4">No material yield data</div></div>;
+                            const COLORS = { PREFORMS: '#f59e0b', CLOSURES: '#8b5cf6', LABELS: '#0ea5e9', SHRINK: '#ec4899', GLUE: '#16a34a' };
                             return (
                                 <div className="card mb-2">
-                                    <div className="card-header py-2 d-flex align-items-center gap-2">
-                                        <i className="ti ti-chart-bar text-success"></i>
+                                    <div className="card-header py-2 d-flex align-items-center gap-2 flex-wrap">
+                                        <i className="ti ti-chart-bar text-info"></i>
                                         <h6 className="mb-0 fw-bold">Material Yield by PET</h6>
-                                        <span className="badge bg-soft-warning text-warning ms-1">{materialDate}</span>
+                                        <span className="badge bg-soft-info text-info ms-1">{materialDate}</span>
                                     </div>
                                     <div className="card-body p-2">
-                                        <ResponsiveContainer width="100%" height={220}>
-                                            <BarChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 5 }} barCategoryGap="20%" barGap={1}>
-                                                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                                                <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#64748b' }} />
-                                                <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: '#64748b' }} tickFormatter={v => `${v}%`} />
-                                                <Tooltip formatter={(v) => [`${v}%`, 'Yield']} />
-                                                <Bar dataKey="yield" fill="#16a34a" />
-                                            </BarChart>
-                                        </ResponsiveContainer>
+                                        <div style={{ width: '100%', height: 320 }}>
+                                            <ResponsiveContainer>
+                                                <BarChart data={chartData} margin={{ top: 8, right: 16, left: 8, bottom: 8 }} barCategoryGap="20%" barGap={1}>
+                                                    <CartesianGrid strokeDasharray="3 3" />
+                                                    <XAxis dataKey="pet" tick={{ fontSize: 11 }} />
+                                                    <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} tickFormatter={v => `${v}%`} />
+                                                    <Tooltip formatter={(v) => [`${Number(v).toFixed(2)}%`, 'Yield']} />
+                                                    <Legend />
+                                                    {materialKeys.map(type => (
+                                                        <Bar key={type} dataKey={type} name={typeLabels[type]} fill={COLORS[type] || '#64748b'} />
+                                                    ))}
+                                                </BarChart>
+                                            </ResponsiveContainer>
+                                        </div>
                                     </div>
                                 </div>
                             );
