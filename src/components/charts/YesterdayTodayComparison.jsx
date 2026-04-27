@@ -1,58 +1,22 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState } from 'react';
 import { productionApi } from '../../api/production';
 
-const clamp = (v) => Math.min(100, Math.max(0, v));
-
-const fetchDayData = async (dateStr) => {
-    const res = await productionApi.getOeeSummary({ production_date: dateStr });
-    return (Array.isArray(res.data) ? res.data : (res.data?.results || []))
-        .filter(r => !r.pet_name?.toLowerCase().includes('can'));
-};
-
 const YesterdayTodayComparison = () => {
-    const [yesterdayData, setYesterdayData] = useState([]);
-    const [todayData, setTodayData] = useState([]);
+    const [data, setData] = useState(null);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
         const fetchData = async () => {
             setLoading(true);
             try {
-                const today = new Date();
-                const yesterday = new Date(today);
-                yesterday.setDate(yesterday.getDate() - 1);
-                const fmt = (d) => d.toISOString().split('T')[0];
-                const [yData, tData] = await Promise.all([
-                    fetchDayData(fmt(yesterday)),
-                    fetchDayData(fmt(today)),
-                ]);
-                setYesterdayData(yData);
-                setTodayData(tData);
+                const res = await productionApi.getTodayYesterdayComparison();
+                const d = res.data;
+                setData(d);
             } catch (e) { console.error('Comparison fetch error:', e); }
             finally { setLoading(false); }
         };
         fetchData();
     }, []);
-
-    const data = useMemo(() => {
-        const agg = (reports, includeAll = false) => {
-            if (!reports.length) return { efficiency: 0, availability: 0, quality: 0, performance: 0, production: 0, downtime: 0, lines: 0 };
-            const active = includeAll ? reports : reports.filter(r => (r.total_bottles_produced || 0) > 0);
-            const n = active.length || 1;
-            const availability = active.reduce((s, r) => s + (parseFloat(r.metrics?.availability) || 0), 0) / n;
-            const performance = active.reduce((s, r) => s + (parseFloat(r.metrics?.efficiency) || 0), 0) / n;
-            const quality = active.reduce((s, r) => s + (parseFloat(r.metrics?.quality) || 0), 0) / n;
-            const oee = active.reduce((s, r) => s + (parseFloat(r.metrics?.oee) || 0), 0) / n;
-            const production = reports.reduce((s, r) => s + (r.total_bottles_produced || 0), 0);
-            const downtime = reports.reduce((s, r) => s + (r.metrics?.details?.total_downtime_mins || 0), 0);
-            const lines = new Set(reports.map(r => r.pet_name).filter(Boolean)).size;
-            return { efficiency: clamp(oee), availability: clamp(availability), quality: clamp(quality), performance: clamp(performance), production, downtime: Math.round(downtime), lines };
-        };
-        const todayAgg = agg(todayData, true);
-        todayAgg.quality = 100;
-        todayAgg.efficiency = Math.floor((todayAgg.availability + todayAgg.performance + todayAgg.quality) / 3 * 100) / 100;
-        return { yesterday: agg(yesterdayData), today: todayAgg };
-    }, [yesterdayData, todayData]);
 
     const Metric = ({ label, sublabel, icon, todayVal, yesterdayVal, unit = '%', suffix = '', invertColor, hideComparison, hideTodayIfZero }) => {
         const diff = todayVal - yesterdayVal;
@@ -97,7 +61,10 @@ const YesterdayTodayComparison = () => {
     const fmtLabel = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
     if (loading) return <div className="card mb-3"><div className="card-body text-center py-3"><div className="spinner-border text-primary" /></div></div>;
-    if (!yesterdayData.length && !todayData.length) return null;
+    if (!data) return null;
+
+    const t = data.today || {};
+    const y = data.yesterday || {};
 
     return (
         <div className="card mb-3">
@@ -114,12 +81,12 @@ const YesterdayTodayComparison = () => {
             </div>
             <div className="card-body py-3">
                 <div className="d-flex flex-nowrap gap-2" style={{ overflowX: 'auto' }}>
-                    <Metric label="OEE" sublabel="Weighted Avg." icon="ti-gauge" todayVal={data.today.efficiency} yesterdayVal={data.yesterday.efficiency} />
-                    <Metric label="Output" icon="ti-bottle" todayVal={data.today.production} yesterdayVal={data.yesterday.production} unit="n" hideComparison hideTodayIfZero />
-                    <Metric label="Downtime" icon="ti-clock-pause" todayVal={data.today.downtime} yesterdayVal={data.yesterday.downtime} unit="n" suffix=" min" invertColor hideComparison />
-                    <Metric label="Availability" icon="ti-clock-check" todayVal={data.today.availability} yesterdayVal={data.yesterday.availability} />
-                    <Metric label="Quality" icon="ti-rosette-discount-check" todayVal={data.today.quality} yesterdayVal={data.yesterday.quality} />
-                    <Metric label="Performance" icon="ti-activity" todayVal={data.today.performance} yesterdayVal={data.yesterday.performance} />
+                    <Metric label="OEE" sublabel="Weighted Avg." icon="ti-gauge" todayVal={t.oee || 0} yesterdayVal={y.oee || 0} />
+                    <Metric label="Output" icon="ti-bottle" todayVal={t.total_output || 0} yesterdayVal={y.total_output || 0} unit="n" hideComparison hideTodayIfZero />
+                    <Metric label="Downtime" icon="ti-clock-pause" todayVal={t.downtime || 0} yesterdayVal={y.downtime || 0} unit="n" suffix=" min" invertColor hideComparison />
+                    <Metric label="Availability" sublabel="Weighted" icon="ti-clock-check" todayVal={t.availability_weighted_avg || 0} yesterdayVal={y.availability_weighted_avg || 0} />
+                    <Metric label="Quality" sublabel="Weighted" icon="ti-rosette-discount-check" todayVal={t.quality_weighted_avg || 0} yesterdayVal={y.quality_weighted_avg || 0} />
+                    <Metric label="Performance" sublabel="Weighted" icon="ti-activity" todayVal={t.efficiency_weighted_avg || 0} yesterdayVal={y.efficiency_weighted_avg || 0} />
                 </div>
             </div>
         </div>

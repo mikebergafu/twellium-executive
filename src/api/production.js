@@ -9,4 +9,6 @@ export const productionApi = {
     getReportOeeMetrics: (id) => api.get(`/production/reports/${id}/oee_metrics/`),
     getOeeSummary: (params) => api.get('/production/reports/oee_summary/', { params }),
     getMaterialConsumptions: (params) => api.get('/production/material-consumptions/', { params }),
+    getTodayYesterdayComparison: () => api.get('/production/dashboard/today_yesterday_comparison/'),
+    getShiftPetMetrics: (params) => api.get('/production/dashboard/shift_pet_metrics/', { params }),
 };

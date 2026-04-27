@@ -154,6 +154,7 @@ const Overview = () => {
     const [rawStoppages, setRawStoppages] = useState([]);
     const [hourlyReports, setHourlyReports] = useState([]);
     const [shiftOeeReports, setShiftOeeReports] = useState([]);
+    const [shiftPetData, setShiftPetData] = useState([]);
     const [materialConsumptions, setMaterialConsumptions] = useState([]);
     const [materialReportPetMap, setMaterialReportPetMap] = useState({});
     const [yieldDate, setYieldDate] = useState(() => {
@@ -378,45 +379,28 @@ const Overview = () => {
                 lastUpdated: null
             });
 
-            // Calculate shift date range based on shift times
-            const shiftParams = {
-                production_date: refDateStr
-            };
+            const res = await productionApi.getShiftPetMetrics({ date: refDateStr });
+            const petMetrics = res.data?.pets || [];
 
-            // Include PET filter if selected
-            if (filters.pet) {
-                shiftParams.pet = filters.pet;
-            }
-
-            const [shiftReportsRes, oeeSummaryRes] = await Promise.all([
-                productionApi.getStoppagesSummary(shiftParams),
-                productionApi.getOeeSummary({ production_date: refDateStr })
-            ]);
-
-            // Use oee_summary data — array of per-line summaries
-            const oeeSummaryRaw = Array.isArray(oeeSummaryRes.data) ? oeeSummaryRes.data : (oeeSummaryRes.data?.results || []);
-            let oeeSummaryList = oeeSummaryRaw.filter(r => !r.pet_name?.toLowerCase().includes('can') && r.shift_name === targetShift.name);
-
-            // If current shift has no data and user didn't manually select, fall back to other shift
-            if (oeeSummaryList.length === 0 && !selectedShiftId && otherShift) {
-                oeeSummaryList = oeeSummaryRaw.filter(r => !r.pet_name?.toLowerCase().includes('can') && r.shift_name === otherShift.name);
-                if (oeeSummaryList.length > 0) {
-                    setCurrentShiftInfo(prev => ({ ...prev, id: otherShift.id, name: otherShift.name, start_time: otherShift.start_time, end_time: otherShift.end_time }));
+            let filtered = petMetrics.filter(p => !p.pet_name?.toLowerCase().includes('can'));
+            
+            // Determine active shift from the data
+            const dataShifts = [...new Set(filtered.map(p => p.shift).filter(Boolean))];
+            if (dataShifts.length > 0 && !selectedShiftId) {
+                const activeShift = shifts.find(s => dataShifts.includes(s.name));
+                if (activeShift && activeShift.id !== targetShift.id) {
+                    setCurrentShiftInfo(prev => ({ ...prev, id: activeShift.id, name: activeShift.name, start_time: activeShift.start_time, end_time: activeShift.end_time }));
                 }
             }
-            setShiftOeeReports(oeeSummaryList);
-            
-            // Handle nested response: response.data is already unwrapped
-            const outerData = shiftReportsRes?.data || {};
-            const stoppagesArray = outerData.data || outerData.results || [];
-            const shiftReports = stoppagesArray.filter(r => !r.pet_name?.toLowerCase().includes('can'));
-            
+            // Only update if we have data; otherwise keep displaying previous shift data
+            if (filtered.length > 0) {
+                setShiftPetData(filtered);
+            }
 
-            // Get the latest log_time from the reports
-            const latestTime = shiftReports.reduce((latest, report) => {
-                if (report.log_time) {
-                    const time = new Date(report.log_date + 'T' + report.log_time);
-                    return !latest || time > latest ? time : latest;
+            const latestTime = filtered.reduce((latest, p) => {
+                if (p.last_log_time) {
+                    const t = new Date(p.last_log_time);
+                    return !latest || t > latest ? t : latest;
                 }
                 return latest;
             }, null);
@@ -434,19 +418,11 @@ const Overview = () => {
                     })
                 }));
             }
-
-            const sortByPet = (arr) => arr.sort((a, b) => {
-                const aNum = parseInt(a.pet_name?.match(/(\d+)/)?.[0] || '999');
-                const bNum = parseInt(b.pet_name?.match(/(\d+)/)?.[0] || '999');
-                return aNum - bNum;
-            });
-
-            setHourlyReports(sortByPet(shiftReports));
             
         } catch (err) {
             console.error('Failed to load shift data:', err);
         }
-    }, [shifts, selectedShiftId, shiftFilterDate, filters]);
+    }, [shifts, selectedShiftId, shiftFilterDate]);
 
     /* Re-fetch whenever filters change */
     useEffect(() => {
@@ -673,59 +649,44 @@ const Overview = () => {
 
     /* Hourly OEE by Line for per-PET gauges */
     const hourlyOeeByLine = useMemo(() => {
-        // Build line map from oee_summary data (shiftOeeReports)
         const lineMap = {};
 
-        // Seed with all known PETs
         rawPets.forEach(pet => {
-            lineMap[pet.pet_name] = { name: pet.pet_name, reports: 0, efficiency: 0, production: 0, downtime: 0, plannedDowntime: 0, plannedTimeMins: 0, totalDowntime: 0, mechDowntime: 0 };
-        });
-
-        // Populate from oee_summary response (keys: metrics.availability, metrics.efficiency, metrics.quality, metrics.oee)
-        shiftOeeReports.forEach(r => {
-            const name = r.pet_name;
-            if (!name) return;
-            if (!lineMap[name]) lineMap[name] = { name, reports: 0, efficiency: 0, production: 0, downtime: 0, plannedDowntime: 0, plannedTimeMins: 0, totalDowntime: 0, mechDowntime: 0 };
-            const l = lineMap[name];
-            l.reports += 1;
-            l.efficiency += parseFloat(r.metrics?.efficiency) || 0;
-            l.production += r.total_bottles_produced || 0;
-            l.downtime += r.metrics?.details?.total_downtime_mins || 0;
-            l.plannedDowntime += r.metrics?.details?.planned_downtime_mins || 0;
-            l.plannedTimeMins += r.metrics?.details?.planned_time_mins || 0;
-            l.totalDowntime += r.metrics?.details?.total_downtime_mins || 0;
-            l.mechDowntime += r.metrics?.details?.mechanical_downtime_mins || 0;
-        });
-
-        // Supplement from hourlyReports (stoppages summary) for lines missing in oee_summary
-        hourlyReports.forEach(r => {
-            const name = r.pet_name;
-            if (!name) return;
-            if (!lineMap[name]) lineMap[name] = { name, reports: 0, efficiency: 0, production: 0, downtime: 0, plannedDowntime: 0, plannedTimeMins: 0, totalDowntime: 0, mechDowntime: 0 };
-            const l = lineMap[name];
-            if (l.reports === 0) {
-                l.reports = 1;
-                l.efficiency = parseFloat(r.efficiency) || 0;
-                l.production = r.bottles_produced || 0;
-                l.downtime = r.downtime_minutes || 0;
+            if (!pet.pet_name?.toLowerCase().includes('can')) {
+                lineMap[pet.pet_name] = { name: pet.pet_name, reports: 0, efficiency: 0, performance: 0, production: 0, downtime: 0, plannedDowntime: 0, mechDowntime: 0, stoppageCount: 0, status: 'Stopped', lastUpdated: null };
             }
         });
 
-        return Object.values(lineMap).map(l => {
-            const eff = l.reports > 0 ? l.efficiency / l.reports : 0;
-            return {
-                name: l.name,
-                reports: l.reports,
-                oee: clamp(eff),
-                performance: clamp(eff),
-                perfRaw: { plannedTime: l.plannedTimeMins, totalDowntime: l.totalDowntime || l.downtime, plannedDowntime: l.plannedDowntime, mechDowntime: l.mechDowntime },
-                production: l.production,
-                downtime: l.downtime,
-                stoppageCount: l.reports,
-                lastUpdated: null,
-            };
-        }).sort((a, b) => sortPetByNumber(a.name, b.name));
-    }, [hourlyReports, rawPets, currentShiftInfo, shiftOeeReports]);
+        shiftPetData.forEach(p => {
+            const name = p.pet_name;
+            if (!name) return;
+            if (!lineMap[name]) lineMap[name] = { name, reports: 0, efficiency: 0, performance: 0, production: 0, downtime: 0, plannedDowntime: 0, mechDowntime: 0, stoppageCount: 0, status: 'Stopped', lastUpdated: null };
+            const l = lineMap[name];
+            l.efficiency = p.efficiency || 0;
+            l.performance = p.performance || 0;
+            l.production = p.total_bottles || 0;
+            l.downtime = p.total_downtime || 0;
+            l.plannedDowntime = p.planned_downtime || 0;
+            l.mechDowntime = p.mechanical_downtime || 0;
+            l.stoppageCount = p.total_stoppage_reports_submitted || 0;
+            l.reports = p.total_production_reports_submitted || 0;
+            l.status = p.status || 'Stopped';
+            l.lastUpdated = p.last_log_time || null;
+        });
+
+        return Object.values(lineMap).map(l => ({
+            name: l.name,
+            reports: l.reports,
+            oee: clamp(l.efficiency),
+            performance: clamp(l.performance),
+            perfRaw: { totalDowntime: l.downtime, plannedDowntime: l.plannedDowntime, mechDowntime: l.mechDowntime },
+            production: l.production,
+            downtime: l.downtime,
+            stoppageCount: l.stoppageCount,
+            status: l.status,
+            lastUpdated: l.lastUpdated,
+        })).sort((a, b) => sortPetByNumber(a.name, b.name));
+    }, [rawPets, shiftPetData]);
 
     const petLineNames = useMemo(() => {
         const names = new Set(ALL_PET_NAMES);
@@ -742,22 +703,23 @@ const Overview = () => {
             petMap[name] = { name, total: 0, downtime: 0, runTime: 0, stoppageCount: 0 };
         });
 
-        rawStoppages.forEach(s => {
-            const name = normPet(s.pet_name || s.line_name);
+        const reports = oeeReports.length > 0 ? oeeReports : rawReports;
+        reports.forEach(r => {
+            const name = normPet(r.pet_name || r.line_name);
             if (!name) return;
             if (!petMap[name]) petMap[name] = { name, total: 0, downtime: 0, runTime: 0, stoppageCount: 0 };
 
-            const downtime = Number(s.downtime_minutes);
-            const safeDowntime = Number.isFinite(downtime) ? downtime : 0;
+            const plannedMins = r.metrics?.details?.planned_time_mins || 0;
+            const downtimeMins = r.metrics?.details?.total_downtime_mins || 0;
 
-            petMap[name].total += 1;
-            petMap[name].downtime += safeDowntime;
-            petMap[name].runTime += Math.max(0, 60 - safeDowntime);
-            petMap[name].stoppageCount += Array.isArray(s.incidents) ? s.incidents.length : 0;
+            petMap[name].total += plannedMins / 60;
+            petMap[name].downtime += downtimeMins;
+            petMap[name].runTime += Math.max(0, plannedMins - downtimeMins);
+            petMap[name].stoppageCount += 1;
         });
 
         return Object.values(petMap).sort((a, b) => sortPetByNumber(a.name, b.name));
-    }, [petLineNames, rawStoppages]);
+    }, [petLineNames, oeeReports, rawReports]);
 
     const resourceConsumptionByPet = useMemo(() => {
         const ELEC = 2.5;
@@ -799,7 +761,7 @@ const Overview = () => {
     const formatN = (n) => (n ?? 0).toLocaleString();
     const activeDateLabel = new Date(oeeDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
     const shiftDateLabel = new Date(shiftFilterDate + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-    const runningLinesCount = hourlyOeeByLine.filter(line => line.reports > 0 && line.production > 0).length;
+    const runningLinesCount = hourlyOeeByLine.filter(line => line.status === 'Started' || line.status === 'Running').length;
     const renderResourceConsumptionByPet = () => {
         const { pets, totalElectricity, totalWater, maxElectricity, maxWater } = resourceConsumptionByPet;
         if (!pets.length) return <div className="text-center text-muted py-4">No data</div>;
@@ -1029,13 +991,18 @@ const Overview = () => {
                             })()}
                         </div>
                     </div>
-                    {[
+                    {(() => {
+                        const todayProduced = rawReports.reduce((s, r) => s + (r.total_bottles_produced || 0), 0)
+                            || rawStoppages.reduce((s, r) => s + (r.bottles_produced || 0), 0);
+                        const todayPlannedHrs = rawReports.reduce((s, r) => s + ((r.metrics?.details?.planned_time_mins || 0) / 60), 0);
+                        return [
                         { label: 'Stoppages Today', value: rawStoppages.length, icon: 'ti-alert-triangle', onClick: () => setShowReportsModal(true) },
-                        { label: 'Production Time', value: `${(oee.rawValues?.plannedMins ? (oee.rawValues.plannedMins / 60).toFixed(1) : '0')}h`, icon: 'ti-clock-hour-4' },
-                        { label: 'Pallets', value: formatN(stats.totalProduced ? Math.round(stats.totalProduced / 2880) : 0), icon: 'ti-package' },
-                        { label: 'Packs', value: formatN(stats.totalProduced ? Math.round(stats.totalProduced / 24) : 0), icon: 'ti-packages' },
-                        { label: 'Bottles', value: formatN(stats.totalProduced), icon: 'ti-bottle' },
-                    ].map(kpi => (
+                        { label: 'Production Time (Today)', value: `${todayPlannedHrs ? todayPlannedHrs.toFixed(1) : '0'}h`, icon: 'ti-clock-hour-4' },
+                        { label: 'Pallets (Today)', value: formatN(todayProduced ? Math.round(todayProduced / 2880) : 0), icon: 'ti-package' },
+                        { label: 'Packs (Today)', value: formatN(todayProduced ? Math.round(todayProduced / 24) : 0), icon: 'ti-packages' },
+                        { label: 'Bottles (Today)', value: formatN(todayProduced), icon: 'ti-bottle' },
+                    ];
+                    })().map(kpi => (
                         <div key={kpi.label} className="col">
                             <div className="h-100 d-flex align-items-center gap-2 p-2 rounded-3" style={{ background: 'rgba(255,255,255,0.12)', cursor: kpi.onClick ? 'pointer' : 'default' }}
                                 onClick={kpi.onClick}>
@@ -1095,8 +1062,8 @@ const Overview = () => {
             {isLoading ? <SkeletonGauges count={6} /> : (
             <div className="row g-2">
                 {hourlyOeeByLine.map((line) => {
-                    const eff = line.reports > 0 ? line.performance : 0;
-                    const isRunning = line.reports > 0 && line.production > 0;
+                    const eff = line.performance || 0;
+                    const isRunning = line.status === 'Started' || line.status === 'Running';
                     const borderColor = eff >= 85 ? '#4caf50' : eff >= 60 ? '#ff9800' : eff > 0 ? '#f44336' : '#e0e0e0';
                     return (
                         <div key={line.name} className="col-6 col-md-4 col-xl-2">
@@ -1221,10 +1188,10 @@ const Overview = () => {
                                                         <div className="rounded-3 p-2 h-100" style={{background:'#f8fafc',border:`1px solid ${color}40`,borderLeft:`4px solid ${color}`}}>
                                                             <div className="fw-bold mb-2" style={{fontSize:'0.8rem',color:'#1e293b'}}>{p.name}</div>
                                                             {[
-                                                                {label:'Hours',value:p.total,icon:'ti-clock',color:'#64748b'},
+                                                                {label:'Hours',value:`${p.total.toFixed(1)}h`,icon:'ti-clock',color:'#64748b'},
                                                                 {label:'Run Time',value:`${Math.round(p.runTime)} min`,icon:'ti-player-play',color:'#16a34a'},
                                                                 {label:'Downtime',value:`${Math.round(p.downtime)} min`,icon:'ti-clock-pause',color:'#dc2626'},
-                                                                {label:'Incidents',value:p.stoppageCount,icon:'ti-alert-triangle',color:'#d97706'},
+                                                                {label:'Reports',value:p.stoppageCount,icon:'ti-file-text',color:'#d97706'},
                                                                 {label:'DT %',value:`${dtPct.toFixed(1)}%`,icon:'ti-percentage',color},
                                                             ].map(s => (
                                                                 <div key={s.label} className="d-flex align-items-center gap-1 mb-1">
@@ -1463,10 +1430,10 @@ const Overview = () => {
                                             <div className="rounded-3 p-2 h-100" style={{ background: '#f8fafc', border: `1px solid ${color}40`, borderLeft: `4px solid ${color}` }}>
                                                 <div className="fw-bold mb-2" style={{ fontSize: '0.8rem', color: '#1e293b' }}>{p.name}</div>
                                                 {[
-                                                    {label:'Hours',value:p.total,icon:'ti-clock',color:'#64748b'},
+                                                    {label:'Hours',value:`${p.total.toFixed(1)}h`,icon:'ti-clock',color:'#64748b'},
                                                     {label:'Run Time',value:`${Math.round(p.runTime)} min`,icon:'ti-player-play',color:'#16a34a'},
                                                     {label:'Downtime',value:`${Math.round(p.downtime)} min`,icon:'ti-clock-pause',color:'#dc2626'},
-                                                    {label:'Incidents',value:p.stoppageCount,icon:'ti-alert-triangle',color:'#d97706'},
+                                                    {label:'Reports',value:p.stoppageCount,icon:'ti-file-text',color:'#d97706'},
                                                     {label:'DT %',value:`${dtPct.toFixed(1)}%`,icon:'ti-percentage',color},
                                                 ].map(s => (
                                                     <div key={s.label} className="d-flex align-items-center gap-1 mb-1">
