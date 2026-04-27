@@ -156,6 +156,10 @@ const Overview = () => {
     const [shiftOeeReports, setShiftOeeReports] = useState([]);
     const [materialConsumptions, setMaterialConsumptions] = useState([]);
     const [materialReportPetMap, setMaterialReportPetMap] = useState({});
+    const [yieldDate, setYieldDate] = useState(() => {
+        const d = new Date(); d.setDate(d.getDate() - 1); return d.toISOString().split('T')[0];
+    });
+    const [yieldReports, setYieldReports] = useState([]);
     const [shifts, setShifts] = useState([]);
     const [currentShiftInfo, setCurrentShiftInfo] = useState(null);
     const [selectedShiftId, setSelectedShiftId] = useState(null);
@@ -309,6 +313,21 @@ const Overview = () => {
         };
         fetchMaterials();
     }, [materialDate]);
+
+    // Fetch yield reports for selected date
+    useEffect(() => {
+        if (!yieldDate) return;
+        const fetchYield = async () => {
+            try {
+                const res = await productionApi.getOeeSummary({ production_date: yieldDate });
+                const list = (Array.isArray(res.data) ? res.data : (res.data?.results || [])).filter(r => !r.pet_name?.toLowerCase().includes('can'));
+                setYieldReports(list);
+            } catch {
+                setYieldReports([]);
+            }
+        };
+        fetchYield();
+    }, [yieldDate]);
 
     /* Load shift data separately */
     const loadShiftData = useCallback(async () => {
@@ -835,62 +854,83 @@ const Overview = () => {
             </div>
         );
     };
-    const renderYieldGroupByPet = ({ title, icon, iconClass, factor, unit, divisor = 1, color, barBg }) => {
+    const renderYieldGroupByPet = ({ title, icon, iconClass, type, unit, color, barBg }) => {
         const petMap = {};
-        petLineNames.forEach(name => { petMap[name] = { name, bottles: 0, consumption: 0 }; });
-
-        rawStoppages.forEach(r => {
+        petLineNames.forEach(name => { petMap[name] = { consumption: 0, yieldPct: null, count: 0 }; });
+        yieldReports.forEach(r => {
             const name = normPet(r.pet_name || r.line_name);
             if (!name) return;
-            if (!petMap[name]) petMap[name] = { name, bottles: 0, consumption: 0 };
-
-            const bottles = Number(r.bottles_produced) || 0;
-            petMap[name].bottles += bottles;
-            petMap[name].consumption += (bottles * factor) / divisor;
+            if (!petMap[name]) petMap[name] = { consumption: 0, yieldPct: null, count: 0 };
+            const readings = type === 'syrup' ? (r.syrup_readings || []) : (r.co2_readings || []);
+            readings.forEach(rd => {
+                const consumed = parseFloat(type === 'syrup' ? rd.total_syrup_used_liters : rd.total_co2_consumed_kg) || 0;
+                const yld = parseFloat(type === 'syrup' ? rd.syrup_yield_percentage : rd.co2_yield_percentage);
+                petMap[name].consumption += consumed;
+                if (!isNaN(yld)) { petMap[name].yieldPct = (petMap[name].yieldPct || 0) + yld; petMap[name].count += 1; }
+            });
         });
 
-        const pets = Object.values(petMap).sort((a, b) => sortPetByNumber(a.name, b.name));
-        if (!pets.length) return <div className="text-center text-muted py-4">No data</div>;
+        const allPets = [...petLineNames].sort(sortPetByNumber);
+        if (!allPets.length) return <div className="text-center text-muted py-4">No data</div>;
 
-        const totalConsumption = pets.reduce((s, p) => s + p.consumption, 0);
-        const maxConsumption = Math.max(1, ...pets.map(p => p.consumption));
+        const totalConsumption = allPets.reduce((s, p) => s + (petMap[p]?.consumption || 0), 0);
+        const maxConsumption = Math.max(1, ...allPets.map(p => petMap[p]?.consumption || 0));
 
-        const chartData = pets.map(p => ({
-            name: p.name,
-            consumption: +p.consumption.toFixed(1),
-            bottles: p.bottles,
-            share: totalConsumption > 0 ? +((p.consumption / totalConsumption) * 100).toFixed(1) : 0,
-        }));
+        const chartData = allPets.map(name => {
+            const c = petMap[name] || { consumption: 0, yieldPct: null, count: 0 };
+            return {
+                name,
+                yield: c.count > 0 ? +(c.yieldPct / c.count).toFixed(1) : 0,
+                consumption: +c.consumption.toFixed(2),
+                share: totalConsumption > 0 ? +((c.consumption / totalConsumption) * 100).toFixed(1) : 0,
+            };
+        });
+
+        const best = [...chartData].sort((a, b) => b.yield - a.yield)[0];
+        const low = [...chartData].filter(p => p.consumption > 0).sort((a, b) => a.yield - b.yield)[0];
 
         return (
             <div className="card mb-2">
                 <div className="card-header py-2 d-flex align-items-center gap-2 flex-wrap">
                     <i className={`ti ${icon} ${iconClass}`}></i>
                     <h6 className="mb-0 fw-bold">{title}</h6>
-                    <span className="badge bg-soft-info text-info ms-1">{activeDateLabel}</span>
-                    <span className="badge bg-soft-primary text-primary ms-auto">Total: {totalConsumption.toFixed(1)} {unit}</span>
+                    <div className="d-flex align-items-center gap-1 px-1 py-0 rounded-2" style={{ border: '1px solid #bfdbfe', background: '#eff6ff' }}>
+                        <i className="ti ti-calendar" style={{ fontSize: '0.68rem', color: '#1d4ed8' }}></i>
+                        <input type="date" className="form-control form-control-sm border-0 p-0"
+                            value={yieldDate} onChange={e => setYieldDate(e.target.value)}
+                            max={new Date().toISOString().split('T')[0]}
+                            style={{ width: 118, fontSize: '0.65rem', background: 'transparent', boxShadow: 'none' }} />
+                    </div>
+                    {best && best.yield > 0 && <span className="badge bg-soft-success text-success" style={{ fontSize: '0.65rem' }}>Best: {best.name} ({best.yield}%)</span>}
+                    {low && low.yield > 0 && <span className="badge bg-soft-danger text-danger" style={{ fontSize: '0.65rem' }}>Low: {low.name} ({low.yield}%)</span>}
+                    <span className="badge bg-soft-primary text-primary ms-auto">Total: {totalConsumption.toFixed(2)} {unit}</span>
                 </div>
                 <div className="card-body p-2">
                     <ResponsiveContainer width="100%" height={200}>
                         <LineChart data={chartData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
                             <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                             <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#64748b' }} />
-                            <YAxis tick={{ fontSize: 11, fill: '#64748b' }} tickFormatter={v => `${v} ${unit}`} />
-                            <Tooltip
-                                formatter={(v, name) => name === 'consumption' ? [`${v} ${unit}`, 'Consumption'] : [`${v}%`, 'Share']}
-                                labelFormatter={l => l}
-                                contentStyle={{ fontSize: '0.75rem' }}
-                            />
-                            <Line type="monotone" dataKey="consumption" stroke={color} strokeWidth={2.5} dot={{ r: 5, fill: color, strokeWidth: 2, stroke: '#fff' }} activeDot={{ r: 7 }} />
+                            <YAxis tick={{ fontSize: 11, fill: '#64748b' }} tickFormatter={v => `${v}%`} />
+                            <Tooltip contentStyle={{ fontSize: '0.75rem' }} formatter={(v) => [`${v}%`, 'Yield']} />
+                            <Line type="monotone" dataKey="yield" stroke={color} strokeWidth={2.5} dot={{ r: 5, fill: color, strokeWidth: 2, stroke: '#fff' }} activeDot={{ r: 7 }} />
                         </LineChart>
                     </ResponsiveContainer>
-                    <div className="d-flex justify-content-around mt-1" style={{ fontSize: '0.68rem', color: '#64748b' }}>
+                    <div className="row g-2 mt-1">
                         {chartData.map(p => (
-                            <div key={p.name} className="text-center" style={{ minWidth: 60 }}>
-                                <div style={{ fontWeight: 700, color: '#1e293b', marginBottom: 2 }}>{p.name}</div>
-                                <div style={{ fontWeight: 700, color }}>{p.share}%</div>
-                                <div>{p.consumption} {unit}</div>
-                                <div>{p.bottles.toLocaleString()} btl</div>
+                            <div key={p.name} className="col-xl-2 col-lg-3 col-md-4 col-sm-6 col-6">
+                                <div className="rounded-3 p-2 h-100" style={{ border: `1px solid ${p.consumption > 0 ? `${color}55` : '#e2e8f0'}`, background: p.consumption > 0 ? '#f8fafc' : '#f8fafc88' }}>
+                                    <div className="d-flex align-items-center justify-content-between mb-1">
+                                        <span style={{ fontSize: '0.72rem', fontWeight: 800, color: '#1e293b' }}>{p.name}</span>
+                                        <span className={`badge ${p.yield > 0 ? '' : 'bg-light text-muted'}`} style={p.yield > 0 ? { background: `${color}22`, color } : { fontSize: '0.62rem' }}>{p.yield}%</span>
+                                    </div>
+                                    <div style={{ fontSize: '0.95rem', fontWeight: 800, color: p.consumption > 0 ? '#0f172a' : '#94a3b8', lineHeight: 1.1 }}>
+                                        {p.consumption.toFixed(2)} <span style={{ fontSize: '0.7rem', fontWeight: 700 }}>{unit}</span>
+                                    </div>
+                                    <div style={{ fontSize: '0.62rem', color: '#64748b', marginTop: 2 }}>Share: {p.share}%</div>
+                                    <div style={{ height: 4, borderRadius: 999, background: barBg, overflow: 'hidden', marginTop: 6 }}>
+                                        <div style={{ width: `${Math.min(100, (p.consumption / maxConsumption) * 100)}%`, height: '100%', background: color }} />
+                                    </div>
+                                </div>
                             </div>
                         ))}
                     </div>
@@ -1203,8 +1243,8 @@ const Overview = () => {
                             );
                         })()}
                         {sliderIndex === 1 && renderResourceConsumptionByPet()}
-                        {sliderIndex === 2 && renderYieldGroupByPet({ title: 'Syrup Yield', icon: 'ti-droplet', iconClass: 'text-purple', factor: 0.25, divisor: 1000, unit: 'L', color: '#8b5cf6', barBg: '#ede9fe' })}
-                        {sliderIndex === 3 && renderYieldGroupByPet({ title: 'CO₂ Yield', icon: 'ti-cloud', iconClass: 'text-info', factor: 0.006, unit: 'kg', color: '#0ea5e9', barBg: '#e0f2fe' })}
+                        {sliderIndex === 2 && renderYieldGroupByPet({ title: 'Syrup Yield', icon: 'ti-droplet', iconClass: 'text-purple', type: 'syrup', unit: 'L', color: '#8b5cf6', barBg: '#ede9fe' })}
+                        {sliderIndex === 3 && renderYieldGroupByPet({ title: 'CO₂ Yield', icon: 'ti-cloud', iconClass: 'text-info', type: 'co2', unit: 'kg', color: '#0ea5e9', barBg: '#e0f2fe' })}
                         {sliderIndex === 4 && downtimeCategories.length > 0 && (() => {
                             const max = downtimeCategories[0]?.value || 1;
                             const total = downtimeCategories.reduce((s,c)=>s+c.value,0);
@@ -1666,10 +1706,10 @@ const Overview = () => {
             })()}
 
             {/* ── Syrup Yield per Line ──────────── */}
-            {renderYieldGroupByPet({ title: 'Syrup Yield', icon: 'ti-droplet', iconClass: 'text-purple', factor: 0.25, divisor: 1000, unit: 'L', color: '#8b5cf6', barBg: '#ede9fe' })}
+            {renderYieldGroupByPet({ title: 'Syrup Yield', icon: 'ti-droplet', iconClass: 'text-purple', type: 'syrup', unit: 'L', color: '#8b5cf6', barBg: '#ede9fe' })}
 
             {/* ── CO₂ Yield per Line ─────────────── */}
-            {renderYieldGroupByPet({ title: 'CO₂ Yield', icon: 'ti-cloud', iconClass: 'text-info', factor: 0.006, unit: 'kg', color: '#0ea5e9', barBg: '#e0f2fe' })}
+            {renderYieldGroupByPet({ title: 'CO₂ Yield', icon: 'ti-cloud', iconClass: 'text-info', type: 'co2', unit: 'kg', color: '#0ea5e9', barBg: '#e0f2fe' })}
 
             {/* ── Stoppage Category Horizontal Bar Chart ── */}
             {downtimeCategories.length > 0 && (() => {
