@@ -382,20 +382,24 @@ const Overview = () => {
             const res = await productionApi.getShiftPetMetrics({ date: refDateStr });
             const petMetrics = res.data?.pets || [];
 
-            let filtered = petMetrics.filter(p => !p.pet_name?.toLowerCase().includes('can'));
+            const noCan = petMetrics.filter(p => !p.pet_name?.toLowerCase().includes('can'));
             
-            // Determine active shift from the data
-            const dataShifts = [...new Set(filtered.map(p => p.shift).filter(Boolean))];
-            if (dataShifts.length > 0 && !selectedShiftId) {
+            // Filter by the target shift name (DAY/NIGHT)
+            const filtered = noCan.filter(p => p.shift === targetShift.name);
+
+            // If no data for selected shift, auto-detect active shift when no manual selection
+            if (filtered.length === 0 && !selectedShiftId) {
+                const dataShifts = [...new Set(noCan.map(p => p.shift).filter(Boolean))];
                 const activeShift = shifts.find(s => dataShifts.includes(s.name));
-                if (activeShift && activeShift.id !== targetShift.id) {
+                if (activeShift) {
+                    const fallback = noCan.filter(p => p.shift === activeShift.name);
                     setCurrentShiftInfo(prev => ({ ...prev, id: activeShift.id, name: activeShift.name, start_time: activeShift.start_time, end_time: activeShift.end_time }));
+                    if (fallback.length > 0) setShiftPetData(fallback);
+                    return; // skip the rest — we've set the right data
                 }
             }
-            // Only update if we have data; otherwise keep displaying previous shift data
-            if (filtered.length > 0) {
-                setShiftPetData(filtered);
-            }
+
+            setShiftPetData(filtered);
 
             const latestTime = filtered.reduce((latest, p) => {
                 if (p.last_log_time) {
