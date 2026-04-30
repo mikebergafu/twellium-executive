@@ -83,7 +83,7 @@ const SpeedGauge = ({ value, color, size = 80 }) => {
 };
 
 /* ── OEE Gauge (from twellium-admin) ─────────────── */
-const OeeGauge = ({ value, label, calculation, rawValues }) => {
+const OeeGauge = ({ value, label, calculation, rawValues, yesterdayValue }) => {
     const pct = clamp(value);
     const size = 200, cx = size / 2, cy = size / 2 + 20, r = 65;
     const startA = (Math.PI * 4) / 5, endA = Math.PI / 5, range = startA - endA;
@@ -105,7 +105,19 @@ const OeeGauge = ({ value, label, calculation, rawValues }) => {
                         <line x1={cx} y1={cy} x2={cx+(r-8)*Math.cos(needleA)} y2={cy-(r-8)*Math.sin(needleA)} stroke="#1f2937" strokeWidth="3" strokeLinecap="round" />
                         <circle cx={cx} cy={cy} r="6" fill="#1f2937" /><circle cx={cx} cy={cy} r="3" fill="#fff" />
                     </g>
-                    <text x={cx} y={cy+30} textAnchor="middle" fontSize="26" fontWeight="700" fill="#111827">{pct.toFixed(1)}%</text>
+                    {yesterdayValue != null && (() => {
+                        const yPct = clamp(yesterdayValue);
+                        const yA = startA - (range * yPct) / 100;
+                        const inner = { x: cx + (r - 14) * Math.cos(yA), y: cy - (r - 14) * Math.sin(yA) };
+                        const outer = { x: cx + (r + 14) * Math.cos(yA), y: cy - (r + 14) * Math.sin(yA) };
+                        const lbl = { x: cx + (r + 28) * Math.cos(yA), y: cy - (r + 28) * Math.sin(yA) };
+                        return <g>
+                            <line x1={inner.x} y1={inner.y} x2={outer.x} y2={outer.y} stroke="#6366f1" strokeWidth="2.5" strokeDasharray="3,2" strokeLinecap="round" />
+                            <circle cx={outer.x} cy={outer.y} r="3.5" fill="#6366f1" />
+                            <text x={lbl.x} y={lbl.y + 3} textAnchor="middle" fontSize="8" fontWeight="700" fill="#6366f1">{yesterdayValue}%</text>
+                        </g>;
+                    })()}
+                    <text x={cx} y={cy+30} textAnchor="middle" fontSize="26" fontWeight="700" fill="#111827">{pct.toFixed(2)}%</text>
                     <text x={cx} y={cy+48} textAnchor="middle" fontSize="13" fontWeight="600" fill="#6b7280">{label}</text>
                 </svg>
             </div>
@@ -113,6 +125,13 @@ const OeeGauge = ({ value, label, calculation, rawValues }) => {
                 <div className="mt-3 text-center" style={{ fontSize: '11px', lineHeight: '1.4' }}>
                     {pct === 0 ? (<div className="badge bg-soft-warning text-warning px-2 py-1"><i className="ti ti-alert-circle me-1"></i>{rawValues.reason || 'No data'}</div>)
                     : (<div className="text-muted font-monospace">{rawValues.display}</div>)}
+                </div>
+            )}
+            {yesterdayValue != null && (
+                <div className="mt-1 text-center px-2 py-1 rounded-2" style={{ background: '#f1f5f9', fontSize: '0.72rem' }}>
+                    <span style={{ color: '#64748b' }}>Yesterday: </span>
+                    <span style={{ fontWeight: 700, color: yesterdayValue >= 85 ? '#16a34a' : yesterdayValue >= 60 ? '#d97706' : '#dc2626' }}>{yesterdayValue}%</span>
+                    {(() => { const diff = pct - yesterdayValue; if (diff === 0) return null; const up = diff > 0; return <span style={{ marginLeft: 4, fontSize: '0.65rem', fontWeight: 600, color: up ? '#16a34a' : '#dc2626' }}><i className={`ti ${up ? 'ti-arrow-up' : 'ti-arrow-down'}`}></i>{Math.abs(diff).toFixed(2)}%</span>; })()}
                 </div>
             )}
         </div>
@@ -141,6 +160,8 @@ const Overview = () => {
     });
     const [oeeReports, setOeeReports] = useState([]);
     const [oeeLoading, setOeeLoading] = useState(false);
+    const [comparisonYesterday, setComparisonYesterday] = useState(null);
+    const [comparisonToday, setComparisonToday] = useState(null);
 
     /* Stale-while-revalidate: separate initial vs refresh state */
     const [initialLoading, setInitialLoading] = useState(true);
@@ -273,6 +294,13 @@ const Overview = () => {
         };
         fetchOeeData();
     }, [oeeDate]);
+
+    // Fetch yesterday values from comparison endpoint
+    useEffect(() => {
+        productionApi.getTodayYesterdayComparison()
+            .then(res => { setComparisonYesterday(res.data?.yesterday || null); setComparisonToday(res.data?.today || null); })
+            .catch(() => {});
+    }, []);
 
     useEffect(() => {
         if (!materialDate) return;
@@ -1098,7 +1126,7 @@ const Overview = () => {
                     <h6 className="mb-0">
                         Overall Equipment Effectiveness (Efficiency)
                         <span className="badge bg-soft-info text-info ms-2 fs-11">
-                            <i className="ti ti-calendar me-1"></i>{oeeDate}
+                            <i className="ti ti-calendar me-1"></i>Yesterday
                         </span>
                         <span className="badge bg-soft-primary text-primary ms-2 fs-11">
                             <i className="ti ti-file-text me-1"></i>{rawStoppages.length} stoppage{rawStoppages.length !== 1 ? 's' : ''} today
@@ -1120,18 +1148,16 @@ const Overview = () => {
                     ) : (
                     <div className="row g-2">
                         <div className="col-lg-4 col-sm-6 d-flex justify-content-center">
-                            <OeeGauge value={oee.availability} label="Availability"
-                                calculation={oee.rawValues ? `(${Number(oee.rawValues.plannedMins||0).toFixed(0)} - ${Number(oee.rawValues.totalDowntimeMins||0).toFixed(0)}) / (${Number(oee.rawValues.plannedMins||0).toFixed(0)} - ${Number(oee.rawValues.mechDowntimeMins||0).toFixed(0)}) × 100 = ${oee.availability.toFixed(1)}%` : ''}
-                                rawValues={oee.rawValues ? { display: `(${Number(oee.rawValues.plannedMins||0).toFixed(0)} - ${Number(oee.rawValues.totalDowntimeMins||0).toFixed(0)}) / (${Number(oee.rawValues.plannedMins||0).toFixed(0)} - ${Number(oee.rawValues.mechDowntimeMins||0).toFixed(0)}) × 100`, reason: oee.availability === 0 ? (oee.rawValues.plannedMins === 0 ? 'Planned Time = 0' : 'Availability = 0%') : null } : null} />
+                            <OeeGauge value={comparisonYesterday?.availability_weighted_avg ?? 0} label="Availability"
+                                yesterdayValue={null} />
                         </div>
                         <div className="col-lg-4 col-sm-6 d-flex justify-content-center">
-                            <OeeGauge value={oee.quality} label="Quality"
-                                      rawValues={oee.rawValues ? { display: `(${Number(oee.rawValues.totalProduction||0).toLocaleString()} - ${Number(oee.rawValues.fillerRejects||0).toLocaleString()}) / ${Number(oee.rawValues.totalProduction||0).toLocaleString()} × 100`, reason: oee.quality === 0 ? (oee.rawValues.totalProduction === 0 ? 'Total Production = 0' : 'Quality = 0%') : null } : null} />
+                            <OeeGauge value={comparisonYesterday?.quality_weighted_avg ?? 0} label="Quality"
+                                      yesterdayValue={null} />
                         </div>
                         <div className="col-lg-4 col-sm-6 d-flex justify-content-center">
-                            <OeeGauge value={oee.performance} label="Performance"
-                                calculation={oee.rawValues ? `(${Number(oee.rawValues.plannedMins||0).toFixed(0)} - ${Number(oee.rawValues.totalDowntimeMins||0).toFixed(0)}) / (${Number(oee.rawValues.plannedMins||0).toFixed(0)} - ${Number(oee.rawValues.plannedDowntimeMins||0).toFixed(0)}) × 100 = ${oee.performance.toFixed(1)}%` : ''}
-                                rawValues={oee.rawValues ? { display: `(${Number(oee.rawValues.plannedMins||0).toFixed(0)} - ${Number(oee.rawValues.totalDowntimeMins||0).toFixed(0)}) / (${Number(oee.rawValues.plannedMins||0).toFixed(0)} - ${Number(oee.rawValues.plannedDowntimeMins||0).toFixed(0)}) × 100`, reason: oee.performance === 0 ? 'Operational Time = 0' : null } : null} />
+                            <OeeGauge value={comparisonYesterday?.efficiency_weighted_avg ?? 0} label="Performance"
+                                yesterdayValue={null} />
                         </div>
                     </div>
                     )}
@@ -1772,21 +1798,6 @@ const Overview = () => {
                                 </div>
                                 );
                             })}
-                        </div>
-                        {/* Performance formula */}
-                        <div className="rounded-3 p-2 mb-3" style={{ background: '#f8fafc', fontSize: '0.75rem', color: '#64748b' }}>
-                            <div className="fw-bold mb-1" style={{ color: '#334155' }}>Performance Formula</div>
-                            <div className="font-monospace" style={{ fontSize: '0.7rem' }}>
-                                ((Hours × 60) − Total Downtime) / ((Hours × 60) − Planned Downtime) × 100
-                            </div>
-                            <div className="font-monospace mt-1" style={{ fontSize: '0.7rem', color: '#1565c0' }}>
-                                ({(() => {
-                                    const time = selectedLine.stoppageCount * 60;
-                                    const td = Math.round(selectedLine.perfRaw?.totalDowntime || 0);
-                                    const pd = Math.round(selectedLine.perfRaw?.plannedDowntime || 0);
-                                    return `(${time} − ${td}) / (${time} − ${pd}) × 100 = ${selectedLine.performance.toFixed(1)}%`;
-                                })()}
-                            </div>
                         </div>
                         {/* Detail rows */}
                         {[
