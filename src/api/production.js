@@ -11,4 +11,5 @@ export const productionApi = {
     getMaterialConsumptions: (params) => api.get('/production/material-consumptions/', { params }),
     getTodayYesterdayComparison: () => api.get('/production/dashboard/today_yesterday_comparison/'),
     getShiftPetMetrics: (params) => api.get('/production/dashboard/shift_pet_metrics/', { params }),
+    getMetricsComparison: () => api.get('/production/dashboard/metrics_comparison/'),
 };

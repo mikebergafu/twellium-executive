@@ -162,6 +162,7 @@ const Overview = () => {
     const [oeeLoading, setOeeLoading] = useState(false);
     const [comparisonYesterday, setComparisonYesterday] = useState(null);
     const [comparisonToday, setComparisonToday] = useState(null);
+    const [metricsComparison, setMetricsComparison] = useState(null);
 
     /* Stale-while-revalidate: separate initial vs refresh state */
     const [initialLoading, setInitialLoading] = useState(true);
@@ -299,6 +300,9 @@ const Overview = () => {
     useEffect(() => {
         productionApi.getTodayYesterdayComparison()
             .then(res => { setComparisonYesterday(res.data?.yesterday || null); setComparisonToday(res.data?.today || null); })
+            .catch(() => {});
+        productionApi.getMetricsComparison()
+            .then(res => setMetricsComparison(res.data || null))
             .catch(() => {});
     }, []);
 
@@ -991,32 +995,32 @@ const Overview = () => {
             <div className="rounded-3 p-2 mb-2" style={{ background: 'linear-gradient(135deg, #0f172a 0%, #1d4ed8 100%)', boxShadow: '0 10px 30px rgba(15,23,42,0.25)' }}>
                 <div className="row g-2 align-items-stretch">
                     <div className="col-auto">
-                        <div className="h-100 rounded-3 p-3 d-flex align-items-center justify-content-between" style={{ background: 'rgba(255,255,255,0.12)' }}>
+                        <div className="h-100 rounded-3 p-3 d-flex align-items-center gap-4" style={{ background: 'rgba(255,255,255,0.12)' }}>
                             {(() => {
-                                const active = oeeByLine.filter(l => l.reports > 0);
-                                const sorted = active.length ? [...active].sort((a, b) => a.oee - b.oee) : [];
-                                const low = sorted[0], high = sorted[sorted.length - 1];
-                                const sameLine = high && low && high.name === low.name;
+                                const mc = metricsComparison;
+                                const eYHigh = mc?.efficiency?.yesterday?.pet_max;
+                                const eYLow = mc?.efficiency?.yesterday?.pet_min;
+                                const eTHigh = mc?.efficiency?.today?.pet_max;
+                                const eTLow = mc?.efficiency?.today?.pet_min;
                                 return <>
                                 <div>
-                                    <div style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.7)', fontWeight: 600 }}>Overall Equipment Effectiveness <span style={{ color: 'rgba(255,255,255,0.5)' }}>— Yesterday</span></div>
-                                    {high ? (
-                                        <>
-                                            <div style={{ fontSize: '2rem', fontWeight: 800, color: '#4ade80', lineHeight: 1.1 }}>▲ {high.oee.toFixed(1)}%</div>
-                                            <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.7)' }}>{sameLine ? `${high.name} (only line)` : `Highest — ${high.name}`}</div>
-                                        </>
-                                    ) : (
-                                        <div style={{ fontSize: '2rem', fontWeight: 800, color: '#fff', lineHeight: 1.1 }}>0.0%</div>
-                                    )}
+                                    <div style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.7)', fontWeight: 600 }}>Efficiency by PET Line <span style={{ color: 'rgba(255,255,255,0.5)' }}>— Yesterday</span></div>
+                                    {eYHigh?.value ? (
+                                        <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#4ade80', lineHeight: 1.1 }}>▲ {parseFloat(eYHigh.value).toFixed(1)}% <span style={{ fontSize: '0.75rem', fontWeight: 600 }}>{eYHigh.pet_name}</span></div>
+                                    ) : <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#fff', lineHeight: 1.1 }}>0.0%</div>}
+                                    {eYLow?.value && eYLow.pet_name !== eYHigh?.pet_name ? (
+                                        <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#f87171', lineHeight: 1.1 }}>▼ {parseFloat(eYLow.value).toFixed(1)}% <span style={{ fontSize: '0.75rem', fontWeight: 600 }}>{eYLow.pet_name}</span></div>
+                                    ) : null}
+                                    <div style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.7)', fontWeight: 600, marginTop: 6 }}>Efficiency by PET Line <span style={{ color: 'rgba(255,255,255,0.5)' }}>— Today</span></div>
+                                    {eTHigh?.value ? (
+                                        <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#4ade80', lineHeight: 1.1 }}>▲ {parseFloat(eTHigh.value).toFixed(1)}% <span style={{ fontSize: '0.75rem', fontWeight: 600 }}>{eTHigh.pet_name}</span></div>
+                                    ) : <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#fff', lineHeight: 1.1 }}>0.0%</div>}
+                                    {eTLow?.value && eTLow.pet_name !== eTHigh?.pet_name ? (
+                                        <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#f87171', lineHeight: 1.1 }}>▼ {parseFloat(eTLow.value).toFixed(1)}% <span style={{ fontSize: '0.75rem', fontWeight: 600 }}>{eTLow.pet_name}</span></div>
+                                    ) : null}
                                 </div>
                                 <div className="text-end">
-                                    {low && !sameLine ? (
-                                        <>
-                                            <div style={{ fontSize: '2rem', fontWeight: 800, color: '#f87171', lineHeight: 1.1 }}>▼ {low.oee.toFixed(1)}%</div>
-                                            <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.7)' }}>Lowest — {low.name}</div>
-                                        </>
-                                    ) : null}
-                                    <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.78)', marginTop: 4 }}>Running Lines</div>
+                                    <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.78)', marginTop: 4 }}>Running PET Lines</div>
                                     <div style={{ fontSize: '1.3rem', fontWeight: 700, color: '#fff' }}>{runningLinesCount}/{hourlyOeeByLine.length}</div>
                                 </div>
                                 </>;
@@ -1024,15 +1028,13 @@ const Overview = () => {
                         </div>
                     </div>
                     {(() => {
-                        const todayProduced = rawReports.reduce((s, r) => s + (r.total_bottles_produced || 0), 0)
-                            || rawStoppages.reduce((s, r) => s + (r.bottles_produced || 0), 0);
-                        const todayPlannedHrs = rawReports.reduce((s, r) => s + ((r.metrics?.details?.planned_time_mins || 0) / 60), 0);
+                        const mc = metricsComparison;
                         return [
-                        { label: 'Stoppages Today', value: rawStoppages.length, icon: 'ti-alert-triangle', onClick: () => setShowReportsModal(true) },
-                        { label: 'Production Time (Today)', value: `${todayPlannedHrs ? todayPlannedHrs.toFixed(1) : '0'}h`, icon: 'ti-clock-hour-4' },
-                        { label: 'Pallets (Today)', value: formatN(todayProduced ? Math.round(todayProduced / 2880) : 0), icon: 'ti-package' },
-                        { label: 'Packs (Today)', value: formatN(todayProduced ? Math.round(todayProduced / 24) : 0), icon: 'ti-packages' },
-                        { label: 'Bottles (Today)', value: formatN(todayProduced), icon: 'ti-bottle' },
+                        { label: 'Stoppages Today', value: mc?.total_stoppages?.today ?? 0, icon: 'ti-alert-triangle', onClick: () => setShowReportsModal(true) },
+                        { label: 'Production Time (Today)', value: `${mc?.total_production_time?.today ? parseFloat(mc.total_production_time.today).toFixed(1) : '0'}h`, icon: 'ti-clock-hour-4' },
+                        { label: 'Pallets (Today)', value: formatN(mc?.total_pallets?.today ?? 0), icon: 'ti-package' },
+                        { label: 'Packs (Today)', value: formatN(mc?.total_packs?.today ?? 0), icon: 'ti-packages' },
+                        { label: 'Bottles (Today)', value: formatN(mc?.total_bottles_produced?.today ?? 0), icon: 'ti-bottle' },
                     ];
                     })().map(kpi => (
                         <div key={kpi.label} className="col">
