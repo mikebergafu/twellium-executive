@@ -937,7 +937,9 @@ const Overview = () => {
         );
     };
     return (
-        <div style={{ background: '#000', minHeight: '100vh', padding: '10px 14px' }}>
+        <div className="dash-dark" style={{ background: '#000', minHeight: '100vh', padding: '10px 14px' }}>
+            <style>{`.dash-dark .card { border-color: #333 !important; }
+.dash-dark .card-header { border-color: #333 !important; }`}</style>
             {/* ── Top Bar ─────────────────────────── */}
             <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2 pb-2" style={{ borderBottom: '1px solid #d7deea' }}>
                 <div className="d-flex align-items-center gap-3">
