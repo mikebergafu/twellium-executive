@@ -689,17 +689,25 @@ const Overview = () => {
 
         rawPets.forEach(pet => {
             if (!pet.pet_name?.toLowerCase().includes('can')) {
-                lineMap[pet.pet_name] = { name: pet.pet_name, reports: 0, efficiency: 0, performance: 0, production: 0, downtime: 0, plannedDowntime: 0, mechDowntime: 0, stoppageCount: 0, status: 'Stopped', lastUpdated: null };
+                lineMap[pet.pet_name] = { name: pet.pet_name, reports: 0, oee: 0, availability: 0, quality: 0, performance: 0, production: 0, downtime: 0, plannedDowntime: 0, mechDowntime: 0, stoppageCount: 0, status: 'Stopped', lastUpdated: null };
             }
         });
 
         shiftPetData.forEach(p => {
             const name = p.pet_name;
             if (!name) return;
-            if (!lineMap[name]) lineMap[name] = { name, reports: 0, efficiency: 0, performance: 0, production: 0, downtime: 0, plannedDowntime: 0, mechDowntime: 0, stoppageCount: 0, status: 'Stopped', lastUpdated: null };
+            if (!lineMap[name]) lineMap[name] = { name, reports: 0, oee: 0, availability: 0, quality: 0, performance: 0, production: 0, downtime: 0, plannedDowntime: 0, mechDowntime: 0, stoppageCount: 0, status: 'Stopped', lastUpdated: null };
             const l = lineMap[name];
-            l.efficiency = p.efficiency || 0;
-            l.performance = p.performance || 0;
+            const availability = parseFloat(p.availability) || 0;
+            const performance = parseFloat(p.performance) || 0;
+            const quality = parseFloat(p.quality) || 0;
+            const apiOee = parseFloat(p.oee);
+            l.oee = Number.isFinite(apiOee)
+                ? apiOee
+                : (clamp(availability) / 100) * (clamp(performance) / 100) * (clamp(quality) / 100) * 100;
+            l.availability = availability;
+            l.quality = quality;
+            l.performance = performance;
             l.production = p.total_bottles || 0;
             l.downtime = p.total_downtime || 0;
             l.plannedDowntime = p.planned_downtime || 0;
@@ -713,7 +721,9 @@ const Overview = () => {
         return Object.values(lineMap).map(l => ({
             name: l.name,
             reports: l.reports,
-            oee: clamp(l.efficiency),
+            oee: clamp(l.oee),
+            availability: clamp(l.availability),
+            quality: clamp(l.quality),
             performance: clamp(l.performance),
             perfRaw: { totalDowntime: l.downtime, plannedDowntime: l.plannedDowntime, mechDowntime: l.mechDowntime },
             production: l.production,
@@ -1098,7 +1108,7 @@ const Overview = () => {
             {isLoading ? <SkeletonGauges count={6} /> : (
             <div className="row g-2">
                 {hourlyOeeByLine.map((line) => {
-                    const eff = line.performance || 0;
+                    const eff = line.oee || 0;
                     const isRunning = line.status === 'Started' || line.status === 'Running';
                     const borderColor = eff >= 85 ? '#4caf50' : eff >= 60 ? '#ff9800' : eff > 0 ? '#f44336' : '#e0e0e0';
                     return (
@@ -1151,16 +1161,20 @@ const Overview = () => {
                         <div className="text-center py-3"><div className="spinner-border text-primary" role="status" /></div>
                     ) : (
                     <div className="row g-2">
-                        <div className="col-lg-4 col-sm-6 d-flex justify-content-center">
+                        <div className="col-lg-3 col-sm-6 d-flex justify-content-center">
+                            <OeeGauge value={parseFloat(comparisonYesterday?.oee) || 0} label="OEE"
+                                yesterdayValue={null} />
+                        </div>
+                        <div className="col-lg-3 col-sm-6 d-flex justify-content-center">
                             <OeeGauge value={comparisonYesterday?.availability_weighted_avg ?? 0} label="Availability"
                                 yesterdayValue={null} />
                         </div>
-                        <div className="col-lg-4 col-sm-6 d-flex justify-content-center">
+                        <div className="col-lg-3 col-sm-6 d-flex justify-content-center">
                             <OeeGauge value={comparisonYesterday?.quality_weighted_avg ?? 0} label="Quality"
                                       yesterdayValue={null} />
                         </div>
-                        <div className="col-lg-4 col-sm-6 d-flex justify-content-center">
-                            <OeeGauge value={comparisonYesterday?.efficiency_weighted_avg ?? 0} label="Performance"
+                        <div className="col-lg-3 col-sm-6 d-flex justify-content-center">
+                            <OeeGauge value={comparisonYesterday?.performance_weighted_avg ?? comparisonYesterday?.efficiency_weighted_avg ?? 0} label="Performance"
                                 yesterdayValue={null} />
                         </div>
                     </div>
@@ -1792,7 +1806,10 @@ const Overview = () => {
                         {/* Gauge row */}
                         <div className="d-flex justify-content-around mb-3">
                             {[
+                                { label: 'OEE', value: selectedLine.oee },
+                                { label: 'Availability', value: selectedLine.availability },
                                 { label: 'Performance', value: selectedLine.performance },
+                                { label: 'Quality', value: selectedLine.quality },
                             ].map(m => {
                                 const c = gaugeColor(m.value);
                                 return (
