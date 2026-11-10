@@ -1056,12 +1056,12 @@ const Overview = () => {
             {/* ── Yesterday vs Today Comparison ──── */}
             <YesterdayTodayComparison />
 
-            {/* ── Shift Production Metrics ─────────── */}
+            {/* ── OEE Metrics ─────────── */}
             <div className="rounded-3 px-2 py-1 mb-2" style={{ background: '#fff', boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
             {/* ── Shift Label ─────────────────────── */}
             <div className="d-flex align-items-center justify-content-between mb-1 flex-wrap gap-1">
                 <div className="d-flex align-items-center gap-2 flex-wrap">
-                    <h6 className="mb-0 fw-bold" style={{ fontSize: '1.05rem' }}>Shift Production Metrics</h6>
+                    <h6 className="mb-0 fw-bold" style={{ fontSize: '1.05rem' }}>OEE Metrics</h6>
                     {currentShiftInfo && (
                         <span className="badge bg-primary" style={{ fontSize: '0.75rem' }}>{currentShiftInfo.name}</span>
                     )}
